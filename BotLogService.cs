@@ -10,6 +10,8 @@ namespace DiscordAudioTests
 {
     public class BotLogService : BackgroundService
     {
+        private const string BASE_CATEGORY_NAME = "Discord.Net";
+
         private readonly DiscordShardedClient _client;
         private readonly ILoggerFactory _loggerFactory;
 
@@ -30,7 +32,7 @@ namespace DiscordAudioTests
         {
             try
             {
-                var logger = _loggerFactory.CreateLogger(arg.Source);
+                var logger = _loggerFactory.CreateLogger($"{BASE_CATEGORY_NAME}.{arg.Source}");
 
                 var logLevel = (LogLevel)(Math.Abs((int)arg.Severity - 5));
 
