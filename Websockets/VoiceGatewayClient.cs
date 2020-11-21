@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.WebSockets;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -53,7 +54,9 @@ namespace DiscordAudioTests.Websockets
 
         private Task ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
         {
-            throw new NotImplementedException();
+            var jsonDocument = JsonDocument.Parse(payloadBytes);
+
+            return Task.CompletedTask;
         }
 
         public ValueTask DisposeAsync()
