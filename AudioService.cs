@@ -1,4 +1,7 @@
+using System;
 using System.Diagnostics;
+using System.IO.Pipelines;
+using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Discord;
@@ -21,25 +24,24 @@ namespace DiscordAudioTests
 
         public async Task StartAsync()
         {
-            var guild = _client.GetGuild(463430274823356417);
-            var voiceChannel = (IVoiceChannel)_client.GetChannel(463471372589465622);
-            var audioClient = await voiceChannel.ConnectAsync();
+            _client.UserVoiceStateUpdated += VoiceStateUpdatedAsync;
+
+            ulong guildId = 463430274823356417;
+            ulong channelId = 463471372589465622;
+
+            var pipe = new Pipe();
 
 
-            using var ffmpeg = CreateStream(AudioFilePath);
-            using var output = ffmpeg.StandardOutput.BaseStream;
-            using var discordAudioStream = audioClient.CreatePCMStream(AudioApplication.Music);
 
-            try
-            {
-                await output.CopyToAsync(discordAudioStream);
-            }
-            finally
-            {
-                await discordAudioStream.FlushAsync();
-                discordAudioStream.Close();
-                await voiceChannel.DisconnectAsync();
-            }
+            _client.UserVoiceStateUpdated += VoiceStateUpdatedAsync;
+        }
+
+        private Task VoiceStateUpdatedAsync(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
+        {
+            if (user.Id != _client.CurrentUser.Id)
+                return Task.CompletedTask;
+
+            return Task.CompletedTask;
         }
 
         private Process CreateStream(string path)
