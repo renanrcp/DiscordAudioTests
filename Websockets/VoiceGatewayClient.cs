@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using DiscordAudioTests.Models;
 
 namespace DiscordAudioTests.Websockets
 {
@@ -48,15 +49,54 @@ namespace DiscordAudioTests.Websockets
             var webSocketUri = new Uri($"wss://{_connectionInfo.Endpoint}?v=4");
 
             await _websocketClient.ConnectAsync(webSocketUri, cts);
-
-
         }
 
         private Task ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
         {
             var jsonDocument = JsonDocument.Parse(payloadBytes);
 
-            return Task.CompletedTask;
+            var rootElement = jsonDocument.RootElement;
+
+            if (!rootElement.TryGetProperty(Payload.OPCODE_PROPERTY_NAME, out var opcodeElement))
+                return Task.CompletedTask;
+
+            if (!rootElement.TryGetProperty(Payload.PAYLOAD_PROPERTY_NAME, out var payloadElement))
+                return Task.CompletedTask;
+
+            if (!opcodeElement.TryGetInt32(out var opcodeRaw))
+                return Task.CompletedTask;
+
+            if (!TryParsePayloadOpcode(opcodeRaw, out var opcode))
+                return Task.CompletedTask;
+
+            if (!Payload.TryGetPayloadTypeByOpCode(opcode, out var payloadType))
+                return Task.CompletedTask;
+
+            return ProcessPayloadByTypeAsync(payloadType, payloadElement);
+        }
+
+        private Task ProcessPayloadByTypeAsync(Type payloadType, JsonElement payloadElement)
+        {
+            var payload = JsonSerializer.Deserialize(payloadElement.GetRawText(), payloadType);
+
+            return payload switch
+            {
+                _ => Task.CompletedTask,
+            };
+        }
+
+        private bool TryParsePayloadOpcode(int opcodeRaw, out PayloadOpcode opcode)
+        {
+            try
+            {
+                opcode = (PayloadOpcode)opcodeRaw;
+                return true;
+            }
+            catch
+            {
+                opcode = PayloadOpcode.Unknown;
+                return false;
+            }
         }
 
         public ValueTask DisposeAsync()

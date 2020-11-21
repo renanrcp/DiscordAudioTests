@@ -2,7 +2,7 @@ namespace DiscordAudioTests.Models
 {
     public enum PayloadOpcode
     {
-        Unknown = 0,
+        Unknown = -1,
         Identify,
         SelectProtocol,
         Ready,
