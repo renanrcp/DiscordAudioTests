@@ -40,11 +40,30 @@ namespace DiscordAudioTests.Websockets
 
         private PipeReader ReceiverReader => _pipeReceiver.Reader;
 
+        public async Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            var cts = GetCancellationToken(cancellationToken);
+
+            var webSocketUri = new Uri($"wss://{_connectionInfo.Endpoint}?v=4");
+
+            await _websocketClient.ConnectAsync(webSocketUri, cts);
+
+
+        }
+
+        private Task ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
+        {
+            throw new NotImplementedException();
+        }
+
         public ValueTask DisposeAsync()
         {
             _websocketClient.Dispose();
 
             return default;
         }
+
+        private CancellationToken GetCancellationToken(CancellationToken cancellationToken)
+            => CancellationTokenSource.CreateLinkedTokenSource(_appToken, cancellationToken).Token;
     }
 }
