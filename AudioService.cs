@@ -24,24 +24,47 @@ namespace DiscordAudioTests
 
         public async Task StartAsync()
         {
-            _client.UserVoiceStateUpdated += VoiceStateUpdatedAsync;
-
             ulong guildId = 463430274823356417;
             ulong channelId = 463471372589465622;
 
-            var pipe = new Pipe();
+            var guild = _client.GetGuild(guildId);
+            var voiceChannel = (IVoiceChannel)guild.GetChannel(channelId);
 
-
+            var sessionIdTsc = new TaskCompletionSource<string>();
+            var socketVoiceServerTsc = new TaskCompletionSource<SocketVoiceServer>();
 
             _client.UserVoiceStateUpdated += VoiceStateUpdatedAsync;
-        }
+            _client.VoiceServerUpdated += VoiceServerUpdatedAsync;
 
-        private Task VoiceStateUpdatedAsync(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
-        {
-            if (user.Id != _client.CurrentUser.Id)
+            Task VoiceStateUpdatedAsync(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
+            {
+                if (user.Id != _client.CurrentUser.Id || string.IsNullOrWhiteSpace(newState.VoiceSessionId))
+                    return Task.CompletedTask;
+
+                sessionIdTsc.TrySetResult(newState.VoiceSessionId);
+
                 return Task.CompletedTask;
+            }
 
-            return Task.CompletedTask;
+            Task VoiceServerUpdatedAsync(SocketVoiceServer arg)
+            {
+                if (arg.Guild.Id == guildId)
+                {
+                    socketVoiceServerTsc.TrySetResult(arg);
+                }
+
+                return Task.CompletedTask;
+            }
+
+            await voiceChannel.ConnectAsync(external: true);
+            var sessionId = await sessionIdTsc.Task;
+            var voiceServer = await socketVoiceServerTsc.Task;
+
+
+            await voiceChannel.DisconnectAsync();
+
+            _client.UserVoiceStateUpdated -= VoiceStateUpdatedAsync;
+            _client.VoiceServerUpdated -= VoiceServerUpdatedAsync;
         }
 
         private Process CreateStream(string path)
