@@ -29,6 +29,7 @@ namespace DiscordAudioTests
 
                 return new DiscordShardedClient(config);
             });
+            services.AddSingleton<AudioService>();
 
             services.AddHostedService<BotLogService>();
             services.AddHostedService<BotStarterService>();
