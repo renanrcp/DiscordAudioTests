@@ -49,6 +49,10 @@ namespace DiscordAudioTests.Websockets
             var webSocketUri = new Uri($"wss://{_connectionInfo.Endpoint}?v=4");
 
             await _websocketClient.ConnectAsync(webSocketUri, cts);
+
+            _ = Task.Run(StartReceiverWriterAsync);
+            _ = Task.Run(StartReceiverReaderAsync);
+            _ = Task.Run(StartChannelReaderAsync);
         }
 
         private Task ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
