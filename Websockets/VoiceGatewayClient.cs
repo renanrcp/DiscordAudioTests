@@ -13,7 +13,7 @@ namespace DiscordAudioTests.Websockets
         private readonly CancellationToken _appToken;
         private readonly ConnectionInfo _connectionInfo;
         private readonly ClientWebSocket _websocketClient;
-        private readonly Channel<ArrayBufferWriter<byte>> _sendingChannel;
+        private readonly Channel<ReadOnlyMemory<byte>> _sendingChannel;
         private readonly Pipe _pipeReceiver;
 
         public VoiceGatewayClient(ConnectionInfo connectionInfo, CancellationToken cancellationToken)
@@ -21,7 +21,7 @@ namespace DiscordAudioTests.Websockets
             _connectionInfo = connectionInfo;
             _appToken = cancellationToken;
             _websocketClient = new ClientWebSocket();
-            _sendingChannel = Channel.CreateBounded<ArrayBufferWriter<byte>>(
+            _sendingChannel = Channel.CreateBounded<ReadOnlyMemory<byte>>(
             new BoundedChannelOptions(10)
             {
                 AllowSynchronousContinuations = true,
@@ -32,9 +32,9 @@ namespace DiscordAudioTests.Websockets
             _pipeReceiver = new Pipe();
         }
 
-        private ChannelWriter<ArrayBufferWriter<byte>> SendWriter => _sendingChannel.Writer;
+        private ChannelWriter<ReadOnlyMemory<byte>> SendWriter => _sendingChannel.Writer;
 
-        private ChannelReader<ArrayBufferWriter<byte>> SendReader => _sendingChannel.Reader;
+        private ChannelReader<ReadOnlyMemory<byte>> SendReader => _sendingChannel.Reader;
 
         private PipeWriter ReceiverWriter => _pipeReceiver.Writer;
 
