@@ -6,6 +6,6 @@ namespace DiscordAudioTests.Models
     public class HelloPayload
     {
         [JsonPropertyName("heartbeat_interval")]
-        public TimeSpan HeartbeatInterval { get; set; }
+        public float HeartbeatInterval { get; set; }
     }
 }

@@ -2,6 +2,8 @@ using System;
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -32,13 +34,24 @@ namespace DiscordAudioTests.Websockets
         {
             try
             {
-                while (!GeneralToken.IsCancellationRequested)
+                ReadResult readResult = default;
+
+                while (!readResult.IsCompleted && !GeneralToken.IsCancellationRequested)
                 {
                     GeneralToken.ThrowIfCancellationRequested();
 
-                    var payloadBytes = await ReadNextMessageAsync(GeneralToken);
+                    readResult = await ReceiverReader.ReadAsync(GeneralToken);
 
-                    await ProcessPayloadAsync(payloadBytes);
+                    var buffer = readResult.Buffer;
+
+                    var str = Encoding.UTF8.GetString(buffer);
+
+                    if (TryParseJson(buffer, out var jsonPayload))
+                    {
+                        await ProcessPayloadAsync(jsonPayload);
+                    }
+
+                    ReceiverReader.AdvanceTo(buffer.End);
                 }
             }
             finally
@@ -63,22 +76,18 @@ namespace DiscordAudioTests.Websockets
             return await ReceiverWriter.FlushAsync(cancellationToken);
         }
 
-        private async ValueTask<ReadOnlySequence<byte>> ReadNextMessageAsync(CancellationToken cancellationToken = default)
+        private bool TryParseJson(ReadOnlySequence<byte> buffer, out JsonDocument jsonDocument)
         {
-            ReadResult readResult = default;
-
-            while (!readResult.IsCompleted)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                readResult = await ReceiverReader.ReadAsync(cancellationToken);
-
-                var buffer = readResult.Buffer;
-
-                ReceiverReader.AdvanceTo(buffer.Start, buffer.End);
+                jsonDocument = JsonDocument.Parse(buffer);
+                return true;
             }
-
-            return readResult.Buffer;
+            catch
+            {
+                jsonDocument = null;
+                return false;
+            }
         }
     }
 }

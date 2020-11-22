@@ -8,7 +8,7 @@ namespace DiscordAudioTests.Websockets
 {
     public partial class VoiceGatewayClient
     {
-        public async Task StartChannelReaderAsync()
+        private async Task StartChannelReaderAsync()
         {
             while (await SendReader.WaitToReadAsync(GeneralToken))
             {

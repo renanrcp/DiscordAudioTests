@@ -8,7 +8,8 @@ namespace DiscordAudioTests.Models
     {
         private static readonly IReadOnlyDictionary<PayloadOpcode, Type> _payloadTypes = new Dictionary<PayloadOpcode, Type>
         {
-
+            { PayloadOpcode.Hello, typeof(HelloPayload) },
+            { PayloadOpcode.Ready, typeof(ReadyPayload) },
         };
 
         public const string OPCODE_PROPERTY_NAME = "op";

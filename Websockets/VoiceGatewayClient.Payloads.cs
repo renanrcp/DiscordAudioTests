@@ -9,9 +9,14 @@ namespace DiscordAudioTests.Websockets
         private TimeSpan _heartbeatInterval;
         private int _heartbeatCount;
 
+        private ValueTask ProcessReadyPayloadAsync(ReadyPayload payload)
+        {
+            return default;
+        }
+
         private ValueTask ProcessHelloPayloadAsync(HelloPayload payload)
         {
-            _heartbeatInterval = payload.HeartbeatInterval;
+            _heartbeatInterval = TimeSpan.FromMilliseconds(payload.HeartbeatInterval);
 
             _ = _heartbeatLock.Release();
 
@@ -41,6 +46,8 @@ namespace DiscordAudioTests.Websockets
                 GeneralToken.ThrowIfCancellationRequested();
 
                 await Task.Delay(_heartbeatInterval, GeneralToken);
+
+                _heartbeatCount++;
 
                 await SendHeartbeatAsync();
             }

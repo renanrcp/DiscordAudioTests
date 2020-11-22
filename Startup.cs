@@ -1,4 +1,5 @@
 using Discord.WebSocket;
+using DiscordAudioTests.Websockets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -30,6 +31,7 @@ namespace DiscordAudioTests
                 return new DiscordShardedClient(config);
             });
             services.AddSingleton<AudioService>();
+            services.AddTransient<VoiceGatewayClientFactory>();
 
             services.AddHostedService<BotLogService>();
             services.AddHostedService<BotStarterService>();

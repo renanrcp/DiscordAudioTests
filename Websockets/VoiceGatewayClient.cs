@@ -60,10 +60,8 @@ namespace DiscordAudioTests.Websockets
             _ = Task.Run(StartHeartbeatAsync);
         }
 
-        private ValueTask ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
+        private ValueTask ProcessPayloadAsync(JsonDocument jsonDocument)
         {
-            var jsonDocument = JsonDocument.Parse(payloadBytes);
-
             var rootElement = jsonDocument.RootElement;
 
             if (!rootElement.TryGetProperty(Payload.OPCODE_PROPERTY_NAME, out var opcodeElement))
@@ -91,6 +89,7 @@ namespace DiscordAudioTests.Websockets
             return payload switch
             {
                 HelloPayload => ProcessHelloPayloadAsync((HelloPayload)payload),
+                ReadyPayload => ProcessReadyPayloadAsync((ReadyPayload)payload),
                 _ => default,
             };
         }
