@@ -15,11 +15,11 @@ namespace DiscordAudioTests.Websockets
 
             try
             {
-                while (!flushResult.IsCompleted && !_appToken.IsCancellationRequested)
+                while (!flushResult.IsCompleted && !GeneralToken.IsCancellationRequested)
                 {
-                    _appToken.ThrowIfCancellationRequested();
+                    GeneralToken.ThrowIfCancellationRequested();
 
-                    flushResult = await WriteNextMessageAsync(_appToken);
+                    flushResult = await WriteNextMessageAsync(GeneralToken);
                 }
             }
             finally
@@ -32,9 +32,11 @@ namespace DiscordAudioTests.Websockets
         {
             try
             {
-                while (!_appToken.IsCancellationRequested)
+                while (!GeneralToken.IsCancellationRequested)
                 {
-                    var payloadBytes = await ReadNextMessageAsync(_appToken);
+                    GeneralToken.ThrowIfCancellationRequested();
+
+                    var payloadBytes = await ReadNextMessageAsync(GeneralToken);
 
                     await ProcessPayloadAsync(payloadBytes);
                 }

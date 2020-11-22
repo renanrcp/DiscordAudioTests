@@ -12,16 +12,17 @@ namespace DiscordAudioTests.Websockets
 {
     public partial class VoiceGatewayClient : IAsyncDisposable
     {
-        private readonly CancellationToken _appToken;
+        private readonly CancellationTokenSource _generalCts;
         private readonly ConnectionInfo _connectionInfo;
         private readonly ClientWebSocket _websocketClient;
         private readonly Channel<ReadOnlyMemory<byte>> _sendingChannel;
         private readonly Pipe _pipeReceiver;
+        private readonly SemaphoreSlim _heartbeatLock;
 
         public VoiceGatewayClient(ConnectionInfo connectionInfo, CancellationToken cancellationToken)
         {
             _connectionInfo = connectionInfo;
-            _appToken = cancellationToken;
+            _generalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _websocketClient = new ClientWebSocket();
             _sendingChannel = Channel.CreateBounded<ReadOnlyMemory<byte>>(
             new BoundedChannelOptions(10)
@@ -32,7 +33,10 @@ namespace DiscordAudioTests.Websockets
                 FullMode = BoundedChannelFullMode.DropOldest
             });
             _pipeReceiver = new Pipe();
+            _heartbeatLock = new SemaphoreSlim(0);
         }
+
+        private CancellationToken GeneralToken => _generalCts.Token;
 
         private ChannelWriter<ReadOnlyMemory<byte>> SendWriter => _sendingChannel.Writer;
 
@@ -53,6 +57,7 @@ namespace DiscordAudioTests.Websockets
             _ = Task.Run(StartReceiverWriterAsync);
             _ = Task.Run(StartReceiverReaderAsync);
             _ = Task.Run(StartChannelReaderAsync);
+            _ = Task.Run(StartHeartbeatAsync);
         }
 
         private Task ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
@@ -85,6 +90,7 @@ namespace DiscordAudioTests.Websockets
 
             return payload switch
             {
+                HelloPayload => ProcessHelloPayloadAsync((HelloPayload)payload),
                 _ => Task.CompletedTask,
             };
         }
@@ -111,6 +117,6 @@ namespace DiscordAudioTests.Websockets
         }
 
         private CancellationToken GetCancellationToken(CancellationToken cancellationToken)
-            => CancellationTokenSource.CreateLinkedTokenSource(_appToken, cancellationToken).Token;
+            => CancellationTokenSource.CreateLinkedTokenSource(GeneralToken, cancellationToken).Token;
     }
 }
