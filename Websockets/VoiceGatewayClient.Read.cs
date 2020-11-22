@@ -44,14 +44,10 @@ namespace DiscordAudioTests.Websockets
 
                     var buffer = readResult.Buffer;
 
-                    var str = Encoding.UTF8.GetString(buffer);
+                    ReceiverReader.AdvanceTo(buffer.End);
 
                     if (TryParseJson(buffer, out var jsonPayload))
-                    {
-                        await ProcessPayloadAsync(jsonPayload);
-                    }
-
-                    ReceiverReader.AdvanceTo(buffer.End);
+                        _ = Task.Run(() => ProcessPayloadAsync(jsonPayload));
                 }
             }
             finally
