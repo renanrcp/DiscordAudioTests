@@ -51,7 +51,7 @@ namespace DiscordAudioTests.Websockets
                             await ProcessPayloadAsync(jsonPayload);
                     }
 
-                    ReceiverReader.AdvanceTo(buffer.Start, buffer.End);
+                    ReceiverReader.AdvanceTo(buffer.End);
                 }
             }
             finally
