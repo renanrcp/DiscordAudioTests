@@ -9,7 +9,7 @@ namespace DiscordAudioTests.Websockets
         private TimeSpan _heartbeatInterval;
         private int _heartbeatCount;
 
-        private Task ProcessHelloPayloadAsync(HelloPayload payload)
+        private ValueTask ProcessHelloPayloadAsync(HelloPayload payload)
         {
             _heartbeatInterval = payload.HeartbeatInterval;
 
@@ -18,9 +18,11 @@ namespace DiscordAudioTests.Websockets
             return SendIdentifyAsync();
         }
 
-        private Task SendIdentifyAsync()
+        private ValueTask SendIdentifyAsync()
         {
-            return Task.CompletedTask;
+            var identityPayload = new Payload(PayloadOpcode.Identify, new IdentifyPayload(_connectionInfo));
+
+            return SendPayloadAsync(identityPayload);
         }
 
         private ValueTask SendHeartbeatAsync()

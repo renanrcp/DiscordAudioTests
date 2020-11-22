@@ -60,38 +60,38 @@ namespace DiscordAudioTests.Websockets
             _ = Task.Run(StartHeartbeatAsync);
         }
 
-        private Task ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
+        private ValueTask ProcessPayloadAsync(ReadOnlySequence<byte> payloadBytes)
         {
             var jsonDocument = JsonDocument.Parse(payloadBytes);
 
             var rootElement = jsonDocument.RootElement;
 
             if (!rootElement.TryGetProperty(Payload.OPCODE_PROPERTY_NAME, out var opcodeElement))
-                return Task.CompletedTask;
+                return default;
 
             if (!rootElement.TryGetProperty(Payload.PAYLOAD_PROPERTY_NAME, out var payloadElement))
-                return Task.CompletedTask;
+                return default;
 
             if (!opcodeElement.TryGetInt32(out var opcodeRaw))
-                return Task.CompletedTask;
+                return default;
 
             if (!TryParsePayloadOpcode(opcodeRaw, out var opcode))
-                return Task.CompletedTask;
+                return default;
 
             if (!Payload.TryGetPayloadTypeByOpCode(opcode, out var payloadType))
-                return Task.CompletedTask;
+                return default;
 
             return ProcessPayloadByTypeAsync(payloadType, payloadElement);
         }
 
-        private Task ProcessPayloadByTypeAsync(Type payloadType, JsonElement payloadElement)
+        private ValueTask ProcessPayloadByTypeAsync(Type payloadType, JsonElement payloadElement)
         {
             var payload = JsonSerializer.Deserialize(payloadElement.GetRawText(), payloadType);
 
             return payload switch
             {
                 HelloPayload => ProcessHelloPayloadAsync((HelloPayload)payload),
-                _ => Task.CompletedTask,
+                _ => default,
             };
         }
 
