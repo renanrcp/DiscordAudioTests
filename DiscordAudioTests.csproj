@@ -6,8 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Concentus.OggFile" Version="1.0.4" />
     <PackageReference Include="Discord.Net" Version="2.2.0" />
+    <PackageReference Include="FFMpegCore" Version="3.2.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="5.0.0" />
+    <PackageReference Include="NLayer" Version="1.13.0" />
+    <PackageReference Include="NVorbis" Version="0.10.1" />
     <PackageReference Include="System.IO.Pipelines" Version="5.0.0" />
+    <PackageReference Include="YoutubeExplode" Version="5.1.9" />
   </ItemGroup>
 </Project>

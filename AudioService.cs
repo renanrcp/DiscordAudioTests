@@ -11,6 +11,16 @@ using Microsoft.Extensions.Hosting;
 using System.Text.Json;
 using System.Text;
 using DiscordAudioTests.Websockets;
+using FFMpegCore;
+using System.IO;
+using FFMpegCore.Pipes;
+using FFMpegCore.Enums;
+using System.Buffers;
+using NLayer;
+using Concentus.Structs;
+using Concentus.Oggfile;
+using YoutubeExplode;
+using System.Linq;
 
 namespace DiscordAudioTests
 {
@@ -35,57 +45,78 @@ namespace DiscordAudioTests
             var guild = _client.GetGuild(guildId);
             var voiceChannel = (IVoiceChannel)guild.GetChannel(channelId);
 
-            var sessionIdTsc = new TaskCompletionSource<string>();
-            var socketVoiceServerTsc = new TaskCompletionSource<SocketVoiceServer>();
+            // var sessionIdTsc = new TaskCompletionSource<string>();
+            // var socketVoiceServerTsc = new TaskCompletionSource<SocketVoiceServer>();
 
-            _client.UserVoiceStateUpdated += VoiceStateUpdatedAsync;
-            _client.VoiceServerUpdated += VoiceServerUpdatedAsync;
+            // _client.UserVoiceStateUpdated += VoiceStateUpdatedAsync;
+            // _client.VoiceServerUpdated += VoiceServerUpdatedAsync;
 
-            Task VoiceStateUpdatedAsync(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
+            // Task VoiceStateUpdatedAsync(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
+            // {
+            //     if (user.Id != _client.CurrentUser.Id || string.IsNullOrWhiteSpace(newState.VoiceSessionId))
+            //         return Task.CompletedTask;
+
+            //     sessionIdTsc.TrySetResult(newState.VoiceSessionId);
+
+            //     return Task.CompletedTask;
+            // }
+
+            // Task VoiceServerUpdatedAsync(SocketVoiceServer arg)
+            // {
+            //     if (arg.Guild.Id == guildId)
+            //     {
+            //         socketVoiceServerTsc.TrySetResult(arg);
+            //     }
+
+            //     return Task.CompletedTask;
+            // }\
+            var youtubeClient = new YoutubeClient();
+            var manifest = await youtubeClient.Videos.Streams.GetManifestAsync("https://www.youtube.com/watch?v=CY8E6N5Nzec");
+            var streamInfos = manifest.GetAudioOnly();
+            var streamInfo = streamInfos
+                                .Where(a => a.AudioCodec.Equals("opus"))
+                                .FirstOrDefault();
+
+            var sourceStream = await youtubeClient.Videos.Streams.GetAsync(streamInfo);
+
+            var info = await FFProbe.AnalyseAsync(sourceStream);
+
+            var streamReader = new OggStreamReader(sourceStream);
+            var reader = new OpusOggReadStream(new OpusDecoder(48000, 2), sourceStream);
+
+            using var audioClient = await voiceChannel.ConnectAsync();
+            using var outStream = audioClient.CreateOpusStream();
+
+            sourceStream.Position = 0;
+
+            byte[] buffer = null;
+
+            // _ = Task.Delay(TimeSpan.FromSeconds(30))
+            // .ContinueWith((_) =>
+            // {
+            //     streamReader.SeekTo(TimeSpan.FromSeconds(0));
+            // });
+
+            while ((buffer = streamReader.GetNextPacket()) != null)
             {
-                if (user.Id != _client.CurrentUser.Id || string.IsNullOrWhiteSpace(newState.VoiceSessionId))
-                    return Task.CompletedTask;
-
-                sessionIdTsc.TrySetResult(newState.VoiceSessionId);
-
-                return Task.CompletedTask;
+                await outStream.WriteAsync(buffer.AsMemory());
             }
 
-            Task VoiceServerUpdatedAsync(SocketVoiceServer arg)
-            {
-                if (arg.Guild.Id == guildId)
-                {
-                    socketVoiceServerTsc.TrySetResult(arg);
-                }
-
-                return Task.CompletedTask;
-            }
-
-            await voiceChannel.ConnectAsync(external: true);
-            var sessionId = await sessionIdTsc.Task;
-            var voiceServer = await socketVoiceServerTsc.Task;
-
-            var voiceClient = _voiceFactory.Create(voiceServer, sessionId);
-
-            await voiceClient.StartAsync();
-
-            await Task.Delay(TimeSpan.FromMinutes(10));
+            await outStream.FlushAsync();
 
             await voiceChannel.DisconnectAsync();
 
-            _client.UserVoiceStateUpdated -= VoiceStateUpdatedAsync;
-            _client.VoiceServerUpdated -= VoiceServerUpdatedAsync;
-        }
+            // var sessionId = await sessionIdTsc.Task;
+            // var voiceServer = await socketVoiceServerTsc.Task;
 
-        private Process CreateFFmpegStream(string path)
-        {
-            return Process.Start(new ProcessStartInfo
-            {
-                FileName = "ffmpeg",
-                Arguments = $"-hide_banner -loglevel panic -i \"{path}\" -ac 2 -f s16le -ar 48000 pipe:1",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-            });
+            // var voiceClient = _voiceFactory.Create(voiceServer, sessionId);
+
+            // await voiceClient.StartAsync();
+
+            // await Task.Delay(TimeSpan.FromMinutes(10));
+
+            // _client.UserVoiceStateUpdated -= VoiceStateUpdatedAsync;
+            // _client.VoiceServerUpdated -= VoiceServerUpdatedAsync;
         }
     }
 }
