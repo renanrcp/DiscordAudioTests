@@ -1,11 +1,15 @@
+// Licensed to the NextAudio under one or more agreements.
+// NextAudio licenses this file to you under the MIT license.
+
 using System;
+using System.Buffers;
 using System.IO;
 using NVorbis;
 using NVorbis.Contracts;
 
 namespace DiscordAudioTests
 {
-    public class OggStreamReader
+    public class OggStreamReader : IDisposable
     {
         private const double GranuleSampleRate = 48000.0; // Granule position is always expressed in units of 48000hz
         private readonly Stream _stream;
@@ -17,7 +21,7 @@ namespace DiscordAudioTests
         public OggStreamReader(Stream stream)
         {
             _stream = stream ?? throw new ArgumentNullException(nameof(stream));
-            _containerReader = new NVorbis.Ogg.ContainerReader(stream, false)
+            _containerReader = new NVorbis.Ogg.ContainerReader(stream, true)
             {
                 NewStreamCallback = ProccessNewStream
             };
@@ -94,11 +98,50 @@ namespace DiscordAudioTests
                 GranulePosition = packet.GranulePosition.Value;
             }
 
-            byte[] buf = new byte[packet.BitsRemaining / 8];
-            packet.Read(buf, 0, packet.BitsRemaining / 8);
+            var buf = new byte[packet.BitsRemaining / 8];
+            _ = packet.Read(buf, 0, packet.BitsRemaining / 8);
             packet.Done();
 
             return buf;
+        }
+
+        public int ReadNextPacket(Span<byte> buffer)
+        {
+            if (_endOfStream)
+            {
+                return 0;
+            }
+
+            var packet = _packetProvider.GetNextPacket();
+            if (packet == null)
+            {
+                _endOfStream = true;
+                return 0;
+            }
+
+            if (packet.GranulePosition.HasValue)
+            {
+                GranulePosition = packet.GranulePosition.Value;
+            }
+
+            var bufferLength = packet.BitsRemaining / 8;
+
+            var buf = ArrayPool<byte>.Shared.Rent(bufferLength);
+
+            try
+            {
+                var bytesRead = packet.Read(buf, 0, bufferLength);
+
+                packet.Done();
+
+                buf.CopyTo(buffer);
+
+                return bytesRead;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buf, true);
+            }
         }
 
         /// <summary>
@@ -117,7 +160,7 @@ namespace DiscordAudioTests
                 throw new ArgumentOutOfRangeException(nameof(playbackTime));
             }
 
-            long granulePosition = Convert.ToInt64(playbackTime.TotalSeconds * GranuleSampleRate);
+            var granulePosition = (long)(playbackTime.TotalSeconds * GranuleSampleRate);
             SeekToGranulePosition(granulePosition);
         }
 
@@ -145,12 +188,19 @@ namespace DiscordAudioTests
         private int GetPacketGranules(IPacket curPacket, bool isFirst)
         {
             // if it's a resync, there's not any audio data to return
-            if (curPacket.IsResync) return 0;
+            if (curPacket.IsResync)
+            {
+                return 0;
+            }
 
             // if it's not an audio packet, there's no audio data (seems obvious, though...)
-            if (curPacket.ReadBit()) return 0;
+            return curPacket.ReadBit() ? 0 : 1;
+        }
 
-            return 1;
+        public void Dispose()
+        {
+            _containerReader.Dispose();
+            GC.SuppressFinalize(this);
         }
     }
 }

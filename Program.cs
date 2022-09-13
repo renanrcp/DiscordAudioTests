@@ -20,7 +20,7 @@ namespace DiscordAudioTests
                 {
                     var startup = new Startup(hostContext.HostingEnvironment, hostContext.Configuration);
 
-                    startup.ConfigureServices(services);
+                    Startup.ConfigureServices(services);
                 });
     }
 }
