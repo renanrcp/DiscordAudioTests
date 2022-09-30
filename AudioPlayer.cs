@@ -4,138 +4,159 @@
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Audio;
+using Discord.WebSocket;
 using Microsoft.Extensions.Logging;
 
-namespace DiscordAudioTests
+using NextAudioStream = NextAudio.AudioStream;
+
+namespace DiscordAudioTests;
+
+public delegate void SongStarted(AudioPlayer player);
+public delegate void SongFinished(AudioPlayer player);
+public delegate void PlayerFinished(AudioPlayer player);
+public delegate void PlayerException(AudioPlayer player, Exception exception);
+
+public class AudioPlayer : IAsyncDisposable
 {
-    public class AudioPlayer : IAsyncDisposable
+    private readonly CancellationTokenSource _cts = new();
+    private readonly ILogger<AudioPlayer> _logger;
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
+
+    private NextAudioStream _stream;
+    private TaskCompletionSource _pauseTsc;
+    private bool _isStarted;
+    private IAudioClient _audioClient;
+
+    public AudioPlayer(IVoiceChannel voiceChannel, ISocketMessageChannel textChannel, ILogger<AudioPlayer> logger)
     {
-        private readonly CancellationTokenSource _cts = new();
-        private readonly ILogger<AudioPlayer> _logger;
-        private readonly SemaphoreSlim _semaphore = new(1, 1);
+        VoiceChannel = voiceChannel;
+        TextChannel = textChannel;
+        _logger = logger;
+    }
 
-        private OggStreamReader _streamReader;
-        private TaskCompletionSource _pauseTsc;
-        private bool _isStarted;
-        private IAudioClient _audioClient;
+    public IVoiceChannel VoiceChannel { get; }
 
-        public AudioPlayer(IVoiceChannel voiceChannel, ILogger<AudioPlayer> logger)
+    public ISocketMessageChannel TextChannel { get; }
+
+    public ConcurrentQueue<NextAudioStream> Queue { get; } = new();
+
+    public IGuild Guild => VoiceChannel.Guild;
+
+    public bool IsPaused => _pauseTsc != null;
+
+    public bool IsStarted
+    {
+        get => Volatile.Read(ref _isStarted);
+        private set => Volatile.Write(ref _isStarted, value);
+    }
+
+    public bool Disposed { get; private set; }
+
+
+    public event SongStarted SongStarted;
+
+    public event SongFinished SongFinished;
+
+    public event PlayerFinished PlayerFinished;
+
+    public event PlayerException PlayerException;
+
+    public ValueTask StartAsync()
+    {
+        if (IsStarted)
         {
-            VoiceChannel = voiceChannel;
-            _logger = logger;
-        }
-
-        public IVoiceChannel VoiceChannel { get; }
-
-        public ConcurrentQueue<Stream> Queue { get; } = new();
-
-        public IGuild Guild => VoiceChannel.Guild;
-
-        public bool IsPaused => _pauseTsc != null;
-
-        public bool IsStarted
-        {
-            get => Volatile.Read(ref _isStarted);
-            private set => Volatile.Write(ref _isStarted, value);
-        }
-
-        public bool Disposed { get; private set; }
-
-
-        public ValueTask StartAsync()
-        {
-            if (IsStarted)
-            {
-                return ValueTask.CompletedTask;
-            }
-
-            IsStarted = true;
-
-            _ = Task.Run(InternalRunAsync);
-
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask PauseOrResumeAsync()
+        IsStarted = true;
+
+        _ = Task.Run(InternalRunAsync);
+
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask PauseOrResumeAsync()
+    {
+        return PerformActionAsync(() =>
         {
-            return PerformActionAsync(() =>
+            if (!IsPaused)
             {
-                if (!IsPaused)
+                _pauseTsc = new();
+                return;
+            }
+
+            _ = _pauseTsc.TrySetResult();
+            _pauseTsc = null;
+        });
+    }
+
+    public ValueTask StopAsync()
+    {
+        return DisposeAsync();
+    }
+
+    public ValueTask SeekAsync(TimeSpan seekTime)
+    {
+        return !IsStarted
+            ? ValueTask.CompletedTask
+            : PerformActionAsync(() =>
+            {
+                throw new NotImplementedException();
+            });
+    }
+
+    public ValueTask SkipAsync()
+    {
+        return !IsStarted
+            ? ValueTask.CompletedTask
+            : PerformActionAsync(() =>
+            {
+                if (!Queue.TryDequeue(out var stream))
                 {
-                    _pauseTsc = new();
                     return;
                 }
 
-                _ = _pauseTsc.TrySetResult();
-                _pauseTsc = null;
-            });
-        }
-
-        public ValueTask StopAsync()
-        {
-            return DisposeAsync();
-        }
-
-        public ValueTask SeekAsync(TimeSpan seekTime)
-        {
-            return !IsStarted
-                ? ValueTask.CompletedTask
-                : PerformActionAsync(() =>
+                if (_stream != null)
                 {
-                    _streamReader.SeekTo(seekTime);
-                });
-        }
+                    _stream.Dispose();
+                }
 
-        public ValueTask SkipAsync()
-        {
-            return !IsStarted
-                ? ValueTask.CompletedTask
-                : PerformActionAsync(() =>
-                {
-                    if (!Queue.TryDequeue(out var stream))
-                    {
-                        return;
-                    }
-
-                    if (_streamReader != null)
-                    {
-                        _streamReader.Dispose();
-                    }
-
-                    _streamReader = new OggStreamReader(stream);
-                });
-        }
-
-        private ValueTask PerformActionAsync(Action action)
-        {
-            return PerformActionAsync(() =>
-            {
-                action();
-                return ValueTask.CompletedTask;
+                _stream = stream;
+                SongStarted?.Invoke(this);
             });
-        }
+    }
 
-        private async ValueTask PerformActionAsync(Func<ValueTask> action)
+    private ValueTask PerformActionAsync(Action action)
+    {
+        return PerformActionAsync(() =>
         {
-            await _semaphore.WaitAsync();
+            action();
+            return ValueTask.CompletedTask;
+        });
+    }
 
-            try
-            {
-                await action();
-            }
-            finally
-            {
-                _ = _semaphore.Release();
-            }
+    private async ValueTask PerformActionAsync(Func<ValueTask> action)
+    {
+        await _semaphore.WaitAsync();
+
+        try
+        {
+            await action();
         }
+        finally
+        {
+            _ = _semaphore.Release();
+        }
+    }
 
 
-        private async Task InternalRunAsync()
+    private async Task InternalRunAsync()
+    {
+        try
         {
             await SkipAsync();
 
@@ -156,19 +177,24 @@ namespace DiscordAudioTests
 
                 await PerformActionAsync(async () =>
                 {
-                    var bytesRead = _streamReader.ReadNextPacket(memoryOwner.Memory.Span);
+                    var bytesRead = _stream.Read(memoryOwner.Memory.Span);
 
                     if (bytesRead <= 0)
                     {
+                        SongFinished.Invoke(this);
+
                         if (!Queue.TryDequeue(out var stream))
                         {
                             finished = true;
+                            PlayerFinished?.Invoke(this);
                             return;
                         }
 
-                        _streamReader.Dispose();
+                        _stream.Dispose();
 
-                        _streamReader = new OggStreamReader(stream);
+                        _stream = stream;
+
+                        SongStarted.Invoke(this);
 
                         return;
                     }
@@ -178,7 +204,7 @@ namespace DiscordAudioTests
                         maxBufferLength = bytesRead;
                     }
 
-                    _logger.LogInformation($"Readed {bytesRead} bytes for guild: {Guild.Name}.");
+                    _logger.LogDebug($"Readed {bytesRead} bytes for guild: {Guild.Name}.");
                     await outStream.WriteAsync(memoryOwner.Memory[..bytesRead], _cts.Token);
                 });
             }
@@ -186,45 +212,51 @@ namespace DiscordAudioTests
             _logger.LogInformation($"The max buffer length was {maxBufferLength} for guild: {Guild.Name}.");
 
             await outStream.FlushAsync();
-
+        }
+        catch (Exception ex)
+        {
+            PlayerException?.Invoke(this, ex);
+        }
+        finally
+        {
             await StopAsync();
         }
+    }
 
 
-        public async ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
+    {
+        if (Disposed)
         {
-            if (Disposed)
-            {
-                return;
-            }
-
-            Disposed = true;
-
-            _cts.Cancel(false);
-            _cts.Dispose();
-
-            _streamReader.Dispose();
-            _semaphore.Dispose();
-
-            if (IsStarted)
-            {
-                await VoiceChannel.DisconnectAsync();
-            }
-
-            if (_audioClient != null)
-            {
-                _audioClient.Dispose();
-            }
-
-
-            foreach (var stream in Queue)
-            {
-                await stream.DisposeAsync();
-            }
-
-            Queue.Clear();
-
-            GC.SuppressFinalize(this);
+            return;
         }
+
+        Disposed = true;
+
+        _cts.Cancel(false);
+        _cts.Dispose();
+
+        _stream.Dispose();
+        _semaphore.Dispose();
+
+        if (IsStarted)
+        {
+            await VoiceChannel.DisconnectAsync();
+        }
+
+        if (_audioClient != null)
+        {
+            _audioClient.Dispose();
+        }
+
+
+        foreach (var stream in Queue)
+        {
+            await stream.DisposeAsync();
+        }
+
+        Queue.Clear();
+
+        GC.SuppressFinalize(this);
     }
 }

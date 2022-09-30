@@ -11,51 +11,50 @@ using Discord.WebSocket;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace DiscordAudioTests
+namespace DiscordAudioTests;
+
+public class BotLogService : BackgroundService
 {
-    public class BotLogService : BackgroundService
+    private const string BASE_CATEGORY_NAME = "Discord.Net";
+
+    private readonly DiscordShardedClient _client;
+    private readonly CommandService _commandService;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ConcurrentDictionary<string, ILogger> _loggers = new();
+
+    public BotLogService(DiscordShardedClient client, CommandService commandService, ILoggerFactory loggerFactory)
     {
-        private const string BASE_CATEGORY_NAME = "Discord.Net";
+        _client = client;
+        _loggerFactory = loggerFactory;
+        _commandService = commandService;
+    }
 
-        private readonly DiscordShardedClient _client;
-        private readonly CommandService _commandService;
-        private readonly ILoggerFactory _loggerFactory;
-        private readonly ConcurrentDictionary<string, ILogger> _loggers = new();
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _client.Log += LogAsync;
+        _commandService.Log += LogAsync;
 
-        public BotLogService(DiscordShardedClient client, CommandService commandService, ILoggerFactory loggerFactory)
+        return Task.CompletedTask;
+    }
+
+    private Task LogAsync(LogMessage arg)
+    {
+        try
         {
-            _client = client;
-            _loggerFactory = loggerFactory;
-            _commandService = commandService;
-        }
+            var categoryName = $"{BASE_CATEGORY_NAME}.{arg.Source}";
 
-        protected override Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            _client.Log += LogAsync;
-            _commandService.Log += LogAsync;
-
-            return Task.CompletedTask;
-        }
-
-        private Task LogAsync(LogMessage arg)
-        {
-            try
+            if (!_loggers.TryGetValue(categoryName, out var logger))
             {
-                var categoryName = $"{BASE_CATEGORY_NAME}.{arg.Source}";
-
-                if (!_loggers.TryGetValue(categoryName, out var logger))
-                {
-                    logger = _loggerFactory.CreateLogger(categoryName);
-                    _ = _loggers.TryAdd(categoryName, logger);
-                }
-
-                var logLevel = (LogLevel)Math.Abs((int)arg.Severity - 5);
-
-                logger.Log(logLevel, default, arg.Exception, arg.Message);
+                logger = _loggerFactory.CreateLogger(categoryName);
+                _ = _loggers.TryAdd(categoryName, logger);
             }
-            catch { }
 
-            return Task.CompletedTask;
+            var logLevel = (LogLevel)Math.Abs((int)arg.Severity - 5);
+
+            logger.Log(logLevel, default, arg.Exception, arg.Message);
         }
+        catch { }
+
+        return Task.CompletedTask;
     }
 }

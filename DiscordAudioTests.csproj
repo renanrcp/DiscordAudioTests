@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
-    <TargetFramework>net5.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <UserSecretsId>dotnet-DiscordAudioTests-D519645D-FEE5-4F18-898D-EC3D2F0BBE08</UserSecretsId>
   </PropertyGroup>
 
@@ -10,10 +10,27 @@
     <PackageReference Include="Discord.Net" Version="2.2.0" />
     <PackageReference Include="FFMpegCore" Version="3.2.0" />
     <PackageReference Include="Matroska.Muxer" Version="0.0.7" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="5.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="6.0.0" />
     <PackageReference Include="NLayer" Version="1.13.0" />
     <PackageReference Include="NVorbis" Version="0.10.1" />
+    <PackageReference Include="Polly" Version="7.2.3" />
     <PackageReference Include="System.IO.Pipelines" Version="5.0.0" />
     <PackageReference Include="YoutubeExplode" Version="6.2.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Reference Include="NextAudio">
+      <HintPath>NextAudio.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Reference Include="NextAudio.Matroska">
+      <HintPath>NextAudio.Matroska.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' != 'Release'">
+    <ProjectReference Include="..\NextAudio\src\NextAudio.Matroska\NextAudio.Matroska.csproj" />
   </ItemGroup>
 </Project>
