@@ -19,7 +19,7 @@ public class Program
             {
                 var startup = new Startup(hostContext.HostingEnvironment, hostContext.Configuration);
 
-                Startup.ConfigureServices(services);
+                startup.ConfigureServices(services);
             });
     }
 }

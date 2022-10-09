@@ -51,7 +51,7 @@ public class BotLogService : BackgroundService
 
             var logLevel = (LogLevel)Math.Abs((int)arg.Severity - 5);
 
-            logger.Log(logLevel, default, arg.Exception, arg.Message);
+            logger.Log(logLevel, default, arg.Exception?.InnerException ?? arg.Exception, arg.Message);
         }
         catch { }
 

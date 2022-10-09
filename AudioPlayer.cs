@@ -177,7 +177,7 @@ public class AudioPlayer : IAsyncDisposable
 
                 await PerformActionAsync(async () =>
                 {
-                    var bytesRead = _stream.Read(memoryOwner.Memory.Span);
+                    var bytesRead = await _stream.ReadAsync(memoryOwner.Memory);
 
                     if (bytesRead <= 0)
                     {

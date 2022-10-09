@@ -50,6 +50,8 @@ public sealed class YoutubeAudioStream : ReadOnlyAudioStream
         set => _sourceStream.Position = value;
     }
 
+    public override RecommendedSynchronicity RecommendedSynchronicity => RecommendedSynchronicity.Async;
+
     public override YoutubeAudioStream Clone()
     {
         return new YoutubeAudioStream(_httpClient, _streamInfo);
@@ -132,7 +134,7 @@ public sealed class YoutubeAudioStream : ReadOnlyAudioStream
         if (_response.IsSuccessStatusCode)
         {
             var stream = await _response.Content.ReadAsStreamAsync();
-            _sourceStream = new BufferedStream(stream);
+            _sourceStream = new BufferedStream(stream, 4 * 1024);
         }
     }
 
@@ -220,5 +222,12 @@ public sealed class YoutubeAudioStream : ReadOnlyAudioStream
         var stream = new YoutubeAudioStream(httpClient, streamInfo);
 
         return stream;
+    }
+
+    public override ValueTask<long> SeekAsync(long offset, SeekOrigin origin, CancellationToken cancellationToken = default)
+    {
+        return cancellationToken.IsCancellationRequested
+            ? ValueTask.FromCanceled<long>(cancellationToken)
+            : ValueTask.FromResult(Seek(offset, origin));
     }
 }

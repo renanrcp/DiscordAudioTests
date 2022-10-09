@@ -11,10 +11,10 @@ using Discord.Commands;
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using NextAudio.Matroska;
-using System.IO;
 using NextAudio.Matroska.Models;
 using System.Net.Http;
 using NextAudio;
+using DiscordAudioTests.Http;
 
 namespace DiscordAudioTests;
 
@@ -23,7 +23,7 @@ public class AudioService
     private readonly ConcurrentDictionary<ulong, AudioPlayer> _players = new();
     private readonly IServiceProvider _provider;
     private readonly YoutubeClient _youtubeClient;
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly MatroskaDemuxerOptions _demuxerOptions;
     private readonly ILogger<AudioService> _logger;
@@ -32,7 +32,7 @@ public class AudioService
     {
         _provider = provider;
         _youtubeClient = provider.GetRequiredService<YoutubeClient>();
-        _httpClient = provider.GetRequiredService<HttpClient>();
+        _httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
         _loggerFactory = provider.GetRequiredService<ILoggerFactory>();
         _logger = _loggerFactory.CreateLogger<AudioService>();
         _demuxerOptions = new MatroskaDemuxerOptions()
@@ -89,14 +89,14 @@ public class AudioService
                             .OrderByDescending(a => a.Bitrate)
                             .FirstOrDefault();
 
-            // var response = await _httpClient.GetAsync(streamInfo.Url, HttpCompletionOption.ResponseHeadersRead);
-            // var ytStream = await response.Content.ReadAsStreamAsync();
-            // sourceStream = new StreamToAudioStream(ytStream);
-            sourceStream = YoutubeAudioStream.CreateStream(_httpClient, streamInfo);
+            sourceStream = YoutubeAudioStream.CreateStream(_httpClientFactory.CreateClient<YoutubeClient>(), streamInfo);
         }
         else
         {
-            sourceStream = new StreamToAudioStream(new BufferedStream(File.Open(url, FileMode.Open)));
+            sourceStream = AudioStream.CreateFromFile(url, new FileAudioStreamOptions()
+            {
+                RecommendedSynchronicity = RecommendedSynchronicity.Async,
+            });
         }
 
         var demuxer = new MatroskaDemuxer(sourceStream, _demuxerOptions, _loggerFactory);
