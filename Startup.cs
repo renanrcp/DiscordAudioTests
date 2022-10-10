@@ -52,7 +52,7 @@ public class Startup
         });
 
         _ = Configuration.GetSection(IPV6RotatorStrategyFactory.IPV6BlockEnvName).Value != null
-            ? services.AddYoutubeClientWithIPV6Rotator<RotateOnBanIPV6RotatorStrategy>()
+            ? services.AddYoutubeClientWithIPV6Rotator<RotatingNanoSwitchIPV6RotatorStrategy>()
             : services.AddYoutubeClient();
 
         _ = services.AddSingleton<AudioService>();
