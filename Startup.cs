@@ -29,6 +29,8 @@ public class Startup
         _ = services.AddSingleton(new DiscordSocketConfig
         {
             AlwaysDownloadUsers = false,
+            LogLevel = LogSeverity.Debug,
+            GatewayIntents = GatewayIntents.All,
         });
         _ = services.AddSingleton(sp =>
         {
