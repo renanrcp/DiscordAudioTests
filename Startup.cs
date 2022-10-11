@@ -5,7 +5,6 @@ using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
 using DiscordAudioTests.Http;
-using DiscordAudioTests.Websockets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -58,7 +57,7 @@ public class Startup
             : services.AddYoutubeClient();
 
         _ = services.AddSingleton<AudioService>();
-        _ = services.AddTransient<VoiceGatewayClientFactory>();
+        //_ = services.AddTransient<VoiceGatewayClientFactory>();
 
         _ = services.AddHostedService<BotLogService>();
         _ = services.AddHostedService<BotStarterService>();

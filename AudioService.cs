@@ -1,20 +1,20 @@
 // Licensed to the NextAudio under one or more agreements.
 // NextAudio licenses this file to you under the MIT license.
 
+using System;
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Discord;
-using YoutubeExplode;
-using System.Linq;
-using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
 using Discord.Commands;
-using System;
+using DiscordAudioTests.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using NextAudio;
 using NextAudio.Matroska;
 using NextAudio.Matroska.Models;
-using System.Net.Http;
-using NextAudio;
-using DiscordAudioTests.Http;
+using YoutubeExplode;
 
 namespace DiscordAudioTests;
 
