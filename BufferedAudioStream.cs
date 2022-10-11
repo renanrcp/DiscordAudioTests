@@ -20,17 +20,15 @@ public class BufferedAudioStream : AudioOutStream
 
     private readonly struct Frame
     {
-        public Frame(IMemoryOwner<byte> buffer, int bytes)
+        public Frame(IMemoryOwner<byte> memoryOwner, int bytes)
         {
-            Buffer = buffer;
+            MemoryOwner = memoryOwner;
             Bytes = bytes;
         }
 
-        public readonly IMemoryOwner<byte> Buffer;
-        public readonly int Bytes;
+        public IMemoryOwner<byte> MemoryOwner { get; }
+        public int Bytes { get; }
     }
-
-    private static readonly byte[] _silenceFrame = Array.Empty<byte>();
 
     private readonly IAudioClient _client;
     private readonly AudioStream _next;
@@ -72,7 +70,14 @@ public class BufferedAudioStream : AudioOutStream
             _cancelTokenSource?.Dispose();
             _queueLock?.Dispose();
             _next.Dispose();
+
+            while (!_queuedFrames.IsEmpty && _queuedFrames.TryDequeue(out var frame))
+            {
+                frame.MemoryOwner.Dispose();
+            }
         }
+
+
         base.Dispose(disposing);
     }
 
@@ -82,7 +87,7 @@ public class BufferedAudioStream : AudioOutStream
         {
             await _preloadedTsc.Task.WaitAsync(_cancelToken);
 
-            await _client.SetSpeakingAsync(true);
+            await _client.SetSpeakingAsync(true).WaitAsync(_cancelToken);
 
             long nextTick = Environment.TickCount;
             ushort seq = 0;
@@ -96,13 +101,13 @@ public class BufferedAudioStream : AudioOutStream
                 {
                     if (_queuedFrames.TryDequeue(out var frame))
                     {
-                        await TryInvokeEmptyQueue();
+                        TryInvokeEmptyQueue();
 
                         _next.WriteHeader(seq, timestamp, false);
 
-                        await _next.WriteAsync(frame.Buffer.Memory[..frame.Bytes], _cancelToken);
+                        await _next.WriteAsync(frame.MemoryOwner.Memory[..frame.Bytes], _cancelToken);
 
-                        frame.Buffer.Dispose();
+                        frame.MemoryOwner.Dispose();
 
                         _ = _queueLock.Release();
 
@@ -122,7 +127,7 @@ public class BufferedAudioStream : AudioOutStream
                             if (_silenceFrames++ < MaxSilenceFrames)
                             {
                                 _next.WriteHeader(seq, timestamp, false);
-                                await _next.WriteAsync(_silenceFrame, _cancelToken);
+                                await _next.WriteAsync(Memory<byte>.Empty, _cancelToken);
                             }
 
                             nextTick += _ticksPerFrame;
@@ -155,7 +160,7 @@ public class BufferedAudioStream : AudioOutStream
             cancellationToken = _cancelToken;
         }
 
-        _ = await _queueLock.WaitAsync(-1, cancellationToken);
+        await _queueLock.WaitAsync(cancellationToken);
 
         var memoryOwner = MemoryPool<byte>.Shared.Rent(buffer.Length);
 
@@ -212,13 +217,11 @@ public class BufferedAudioStream : AudioOutStream
         return Task.CompletedTask;
     }
 
-    private ValueTask TryInvokeEmptyQueue()
+    private void TryInvokeEmptyQueue()
     {
         if (_queuedFrames.IsEmpty && _emptyQueueTsc != null)
         {
             _ = _emptyQueueTsc.TrySetResult();
         }
-
-        return ValueTask.CompletedTask;
     }
 }
