@@ -23,9 +23,6 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 {
     private readonly ulong _guildId;
     private readonly ulong _userId;
-    private readonly string _sessionId;
-    private readonly string _token;
-    private readonly string _endpoint;
     private readonly UdpClient _udpClient = new();
     private readonly WebSocketClient _client;
     private readonly ILogger<VoiceGatewayClient> _logger;
@@ -33,6 +30,9 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private readonly Channel<ReadOnlyMemory<byte>> _sendingChannel;
 
     private CancellationTokenSource _cts = new();
+    private string _sessionId;
+    private string _token;
+    private string _endpoint;
     private TimeSpan _heartbeatInterval;
     private long _lastHeartbeatSent;
     private bool _shouldResume;
@@ -42,12 +42,17 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private EncryptionMode _encryptionMode;
 
     public VoiceGatewayClient(ulong guildId, ulong userId, string sessionId, string token, string endpoint, ILoggerFactory loggerFactory = null)
+        : this(guildId, userId, loggerFactory)
     {
-        _guildId = guildId;
-        _userId = userId;
         _sessionId = sessionId;
         _token = token;
         _endpoint = endpoint;
+    }
+
+    public VoiceGatewayClient(ulong guildId, ulong userId, ILoggerFactory loggerFactory = null)
+    {
+        _guildId = guildId;
+        _userId = userId;
 
         _sendingChannel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(10)
         {
@@ -119,6 +124,27 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         _cts.Dispose();
 
         await _client.StopAsync(cancellationToken);
+    }
+
+    public ValueTask SetConnectionInfoAsync(string sessionId, string token, string endpoint, CancellationToken cancellationToken = default)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled(cancellationToken);
+        }
+
+        _sessionId = sessionId;
+        _token = token;
+        _endpoint = endpoint;
+
+        if (!Started)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        _shouldResume = true;
+
+        return _client.StopAsync(cancellationToken);
     }
 
     public async ValueTask<bool> TryReconnectAsync(CancellationToken cancellationToken = default)
