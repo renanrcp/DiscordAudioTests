@@ -29,10 +29,10 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private readonly UdpClient _udpClient = new();
     private readonly WebSocketClient _client;
     private readonly ILogger<VoiceGatewayClient> _logger;
-    private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _heartbeatLock = new(0);
     private readonly Channel<ReadOnlyMemory<byte>> _sendingChannel;
 
+    private CancellationTokenSource _cts = new();
     private TimeSpan _heartbeatInterval;
     private long _lastHeartbeatSent;
     private bool _shouldResume;
@@ -121,6 +121,36 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         await _client.StopAsync(cancellationToken);
     }
 
+    public async ValueTask<bool> TryReconnectAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cts.Token.IsCancellationRequested || !_shouldResume)
+        {
+            return false;
+        }
+
+        var reconnectTokenIsSameAsCts = cancellationToken == _cts.Token;
+
+        _cts.Cancel(false);
+        _cts = new();
+
+        if (reconnectTokenIsSameAsCts)
+        {
+            cancellationToken = _cts.Token;
+        }
+
+        await _heartbeatLock.WaitAsync(cancellationToken);
+        await _client.StartAsync(cancellationToken);
+
+        return true;
+    }
+
+    public ValueTask SendSpeakingAsync(SpeakingMask speakingMask)
+    {
+        var speakingPayload = new Payload(PayloadOpcode.Speaking, new SpeakingPayload(_ssrc, (int)speakingMask));
+
+        return SendPayloadAsync(speakingPayload);
+    }
+
     private async ValueTask SendMessageAsync(ReadOnlyMemory<byte> buffer)
     {
         // Try write the buffer if has any space available in channel
@@ -140,6 +170,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private ValueTask SendPayloadAsync(Payload payload)
     {
+        _logger.LogPayloadSent(payload);
+
         var bytes = JsonSerializer.SerializeToUtf8Bytes(payload);
 
         var buffer = bytes.AsMemory();
@@ -158,6 +190,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     {
         _shouldResume = false;
 
+        _logger.LogResuming();
+
         var resumePayload = new Payload(PayloadOpcode.Resume, new ResumePayload(_guildId, _sessionId, _token));
 
         return SendPayloadAsync(resumePayload);
@@ -165,6 +199,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private ValueTask SendIdentifyAsync()
     {
+        _logger.LogIdentify();
+
         var identityPayload = new Payload(PayloadOpcode.Identify, new IdentifyPayload(_guildId, _userId, _sessionId, _token));
 
         return SendPayloadAsync(identityPayload);
@@ -174,9 +210,14 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     {
         var mode = EncryptionModeExtensions.SelectMode(modes);
 
-        var selectProtocolPayload = new Payload(PayloadOpcode.SelectProtocol, new SelectProtocolPayload("udp", new(address, port, mode)));
+        _logger.LogEncryptionModeSelected(mode);
 
-        return SendPayloadAsync(selectProtocolPayload);
+        var selectProtocolPayload = new SelectProtocolPayload("udp", new(address, port, mode));
+        var payload = new Payload(PayloadOpcode.SelectProtocol, selectProtocolPayload);
+
+        _logger.LogNewConnectionId(selectProtocolPayload.RtcConnectionId);
+
+        return SendPayloadAsync(payload);
     }
 
     private ValueTask SendClientConnectedAsync()
@@ -186,20 +227,10 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         return SendPayloadAsync(clientConnectedPayload);
     }
 
-    public ValueTask SendSpeakingAsync(SpeakingMask speakingMask)
-    {
-        var speakingPayload = new Payload(PayloadOpcode.Speaking, new SpeakingPayload(_ssrc, (int)speakingMask));
-
-        return SendPayloadAsync(speakingPayload);
-    }
-
     private async Task ConnectionClosed(ConnectionClosedEventArgs e)
     {
-        if (!_cts.Token.IsCancellationRequested && _shouldResume)
+        if (await TryReconnectAsync(_cts.Token))
         {
-            await _heartbeatLock.WaitAsync(_cts.Token);
-            await _client.StartAsync(_cts.Token);
-
             return;
         }
 
@@ -223,6 +254,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private ValueTask ProcessPayloadByOpcodeAsync(JsonElement payloadElement, PayloadOpcode opcode)
     {
+        _logger.LogPayloadReceived(opcode, payloadElement);
+
         return opcode switch
         {
             PayloadOpcode.Ready => HandleReadyAsync(payloadElement.Deserialize<ReadyPayload>()),
@@ -244,6 +277,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private ValueTask HandleHelloAsync(HelloPayload helloPayload)
     {
+        _logger.LogHello(helloPayload.HeartbeatInterval);
+
         _heartbeatInterval = TimeSpan.FromMilliseconds(helloPayload.HeartbeatInterval);
 
         _ = _heartbeatLock.Release();
@@ -262,6 +297,9 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private ValueTask HandleResumedAsync()
     {
         _shouldResume = true;
+
+        _logger.LogResumed();
+
         return ValueTask.CompletedTask;
     }
 
@@ -299,11 +337,15 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
                 var address = ParseIpAddress(addressBuffer.Span);
                 var port = BitConverter.ToUInt16(portBuffer.Span);
 
+                _logger.LogLocalAddress(address, port);
+
                 _shouldResume = true;
 
                 await SendSelectProtocolAsync(readyPayload.Modes, address, port);
 
                 await SendClientConnectedAsync();
+
+                _logger.LogWaitingSessionDescription();
             }
         }
     }

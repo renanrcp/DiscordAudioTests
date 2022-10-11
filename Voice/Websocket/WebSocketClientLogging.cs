@@ -8,12 +8,15 @@ namespace DiscordAudioTests.Voice.Websocket;
 
 public static partial class WebSocketClientLogging
 {
-    [LoggerMessage(1, LogLevel.Warning, "Websocket disconnected, check your internet connection.")]
+    [LoggerMessage(1, LogLevel.Debug, "Connecting to {Uri}.")]
+    public static partial void LogConnecting(this ILogger logger, Uri uri);
+
+    [LoggerMessage(2, LogLevel.Warning, "Websocket disconnected, check your internet connection.")]
     public static partial void LogWebSocketDisconnect(this ILogger logger);
 
-    [LoggerMessage(2, LogLevel.Debug, "Exception throwed in WebSocketClient.")]
+    [LoggerMessage(3, LogLevel.Debug, "Exception throwed in WebSocketClient.")]
     public static partial void LogWebSocketException(this ILogger logger, Exception exception);
 
-    [LoggerMessage(3, LogLevel.Error, "Error in WebSocketClient. {Message}")]
+    [LoggerMessage(4, LogLevel.Error, "Error in WebSocketClient. {Message}")]
     public static partial void LogWebSocketError(this ILogger logger, Exception exception, string message);
 }

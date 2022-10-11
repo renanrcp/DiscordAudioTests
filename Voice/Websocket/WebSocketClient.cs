@@ -55,6 +55,8 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
 
         try
         {
+            _logger.LogConnecting(_uri);
+
             await _client.ConnectAsync(_uri, cancellationToken);
 
             using var memoryOwner = MemoryPool<byte>.Shared.Rent(RECOMMENDED_BUFFER_SIZE);
