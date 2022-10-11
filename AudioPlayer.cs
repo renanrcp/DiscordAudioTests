@@ -161,7 +161,7 @@ public class AudioPlayer : IAsyncDisposable
             await SkipAsync();
 
             _audioClient = await VoiceChannel.ConnectAsync();
-            using var outStream = _audioClient.CreateOpusStream();
+            using var outStream = new BufferedAudioStream(_audioClient.CreateDirectOpusStream(), _audioClient, 1000, CancellationToken.None);
 
             using var memoryOwner = MemoryPool<byte>.Shared.Rent(1024);
 

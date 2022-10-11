@@ -29,7 +29,7 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
             return;
         }
 
-        var directPlayed = Player.Queue.IsEmpty;
+        var directPlayed = Player.Queue.IsEmpty && !Player.IsStarted;
 
         await _audioService.PlayAsync(Context, url);
 
