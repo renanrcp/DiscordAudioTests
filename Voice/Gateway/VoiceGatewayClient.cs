@@ -30,7 +30,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private readonly WebSocketClient _client;
     private readonly ILogger<VoiceGatewayClient> _logger;
     private readonly CancellationTokenSource _cts = new();
-    private readonly SemaphoreSlim _heartbeatLock = new(1, 1);
+    private readonly SemaphoreSlim _heartbeatLock = new(0);
     private readonly Channel<ReadOnlyMemory<byte>> _sendingChannel;
 
     private TimeSpan _heartbeatInterval;
@@ -193,9 +193,17 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         return SendPayloadAsync(speakingPayload);
     }
 
-    private Task ConnectionClosed(ConnectionClosedEventArgs e)
+    private async Task ConnectionClosed(ConnectionClosedEventArgs e)
     {
-        return Task.CompletedTask;
+        if (!_cts.Token.IsCancellationRequested && _shouldResume)
+        {
+            await _heartbeatLock.WaitAsync(_cts.Token);
+            await _client.StartAsync(_cts.Token);
+
+            return;
+        }
+
+        await StopAsync();
     }
 
     private Task MessageReceived(MessageReceivedEventArgs e)
@@ -312,15 +320,22 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private async Task StartHeartbeatAsync()
     {
-        await _heartbeatLock.WaitAsync(_cts.Token);
-
         while (!_cts.Token.IsCancellationRequested)
         {
-            await Task.Delay(_heartbeatInterval, _cts.Token);
+            await _heartbeatLock.WaitAsync(_cts.Token);
 
-            _lastHeartbeatSent = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            try
+            {
+                await Task.Delay(_heartbeatInterval, _cts.Token);
 
-            await SendHeartbeatAsync(_lastHeartbeatSent);
+                _lastHeartbeatSent = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                await SendHeartbeatAsync(_lastHeartbeatSent);
+            }
+            finally
+            {
+                _ = _heartbeatLock.Release();
+            }
         }
     }
 
