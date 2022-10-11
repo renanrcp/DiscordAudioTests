@@ -100,7 +100,7 @@ public class BufferedAudioStream : AudioOutStream
 
                         _next.WriteHeader(seq, timestamp, false);
 
-                        await _next.WriteAsync(frame.Buffer.Memory[..frame.Bytes]);
+                        await _next.WriteAsync(frame.Buffer.Memory[..frame.Bytes], _cancelToken);
 
                         frame.Buffer.Dispose();
 
@@ -109,7 +109,11 @@ public class BufferedAudioStream : AudioOutStream
                         nextTick += _ticksPerFrame;
                         seq++;
                         timestamp += FrameSamplesPerChannel;
-                        _silenceFrames = 0;
+
+                        if (_silenceFrames != 0)
+                        {
+                            _silenceFrames = 0;
+                        }
                     }
                     else
                     {
@@ -118,7 +122,7 @@ public class BufferedAudioStream : AudioOutStream
                             if (_silenceFrames++ < MaxSilenceFrames)
                             {
                                 _next.WriteHeader(seq, timestamp, false);
-                                await _next.WriteAsync(_silenceFrame);
+                                await _next.WriteAsync(_silenceFrame, _cancelToken);
                             }
 
                             nextTick += _ticksPerFrame;
