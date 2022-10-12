@@ -18,6 +18,8 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
 
     private AudioPlayer Player => _audioService.GetOrCreatePlayerForContext(Context);
 
+    private bool HasPlayer => _audioService.HasPlayerForContext(Context);
+
     private bool UserConnected => (Context.User as IGuildUser).VoiceChannel != null;
 
     [Command("play")]
@@ -50,6 +52,12 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
             return;
         }
 
+        if (!HasPlayer)
+        {
+            _ = await ReplyAsync("The bot isn't connected in any voice channel.");
+            return;
+        }
+
         if (Player.Queue.IsEmpty)
         {
             _ = await ReplyAsync("No songs to Skip.");
@@ -66,6 +74,12 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
         if (!UserConnected)
         {
             _ = await ReplyAsync("You're not connected in a voice channel.");
+            return;
+        }
+
+        if (!HasPlayer)
+        {
+            _ = await ReplyAsync("The bot isn't connected in any voice channel.");
             return;
         }
 
@@ -95,6 +109,12 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
         if (!UserConnected)
         {
             _ = await ReplyAsync("You're not connected in a voice channel.");
+            return;
+        }
+
+        if (!HasPlayer)
+        {
+            _ = await ReplyAsync("The bot isn't connected in any voice channel.");
             return;
         }
 

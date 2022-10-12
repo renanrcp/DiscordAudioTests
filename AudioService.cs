@@ -2,39 +2,45 @@
 // NextAudio licenses this file to you under the MIT license.
 
 using System;
-using System.Collections.Concurrent;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Discord;
 using Discord.Commands;
+using Discord.WebSocket;
 using DiscordAudioTests.Http;
-using Microsoft.Extensions.DependencyInjection;
+using DiscordAudioTests.Voice;
 using Microsoft.Extensions.Logging;
 using NextAudio;
 using NextAudio.Matroska;
 using NextAudio.Matroska.Models;
 using YoutubeExplode;
+using YoutubeExplode.Videos;
 
 namespace DiscordAudioTests;
 
 public class AudioService
 {
-    private readonly ConcurrentDictionary<ulong, AudioPlayer> _players = new();
-    private readonly IServiceProvider _provider;
     private readonly YoutubeClient _youtubeClient;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILoggerFactory _loggerFactory;
+    private readonly VoiceGatewayClientManager _voiceClientManager;
+    private readonly AudioPlayerManager _playerManager;
     private readonly MatroskaDemuxerOptions _demuxerOptions;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<AudioService> _logger;
 
-    public AudioService(IServiceProvider provider)
+    public AudioService(
+        YoutubeClient youtubeClient,
+        IHttpClientFactory httpClientFactory,
+        VoiceGatewayClientManager voiceClientManager,
+        AudioPlayerManager playerManager,
+        ILoggerFactory loggerFactory)
     {
-        _provider = provider;
-        _youtubeClient = provider.GetRequiredService<YoutubeClient>();
-        _httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-        _loggerFactory = provider.GetRequiredService<ILoggerFactory>();
-        _logger = _loggerFactory.CreateLogger<AudioService>();
+        _youtubeClient = youtubeClient;
+        _httpClientFactory = httpClientFactory;
+        _voiceClientManager = voiceClientManager;
+        _playerManager = playerManager;
+        _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<AudioService>();
         _demuxerOptions = new MatroskaDemuxerOptions()
         {
             DisposeSourceStream = true,
@@ -53,18 +59,19 @@ public class AudioService
         };
     }
 
+    public bool HasPlayerForContext(ShardedCommandContext context)
+    {
+        return _playerManager.TryGetPlayerForGuild(context.Guild, out var _);
+    }
+
     public AudioPlayer GetOrCreatePlayerForContext(ShardedCommandContext context)
     {
-        if (_players.TryGetValue(context.Guild.Id, out var player) && !player.Disposed)
+        if (_playerManager.TryGetPlayerForGuild(context.Guild, out var player))
         {
             return player;
         }
 
-        var voiceChannel = (context.User as IGuildUser).VoiceChannel;
-
-        player = new(voiceChannel, context.Channel, _provider.GetRequiredService<ILogger<AudioPlayer>>());
-
-        _players[context.Guild.Id] = player;
+        player = _playerManager.CreatePlayer((SocketTextChannel)context.Channel);
 
         player.SongStarted += SongStarted;
         player.SongFinished += SongFinished;
@@ -80,9 +87,9 @@ public class AudioService
 
         AudioStream sourceStream;
 
-        if (url.StartsWith("http"))
+        if (TryParseYtVideoId(url, out var ytVideoId))
         {
-            var manifest = await _youtubeClient.Videos.Streams.GetManifestAsync(url);
+            var manifest = await _youtubeClient.Videos.Streams.GetManifestAsync(ytVideoId);
 
             var streamInfo = manifest.GetAudioOnlyStreams()
                             .Where(a => a.AudioCodec.Equals("opus", StringComparison.Ordinal))
@@ -102,21 +109,56 @@ public class AudioService
         var demuxer = new MatroskaDemuxer(sourceStream, _demuxerOptions, _loggerFactory);
 
         player.Queue.Enqueue(demuxer);
-        await player.StartAsync();
+
+        if (!player.IsStarted)
+        {
+            var user = (SocketGuildUser)context.User;
+
+            var voiceClient = await _voiceClientManager.GetOrCreateClientAsync(user.VoiceChannel, player);
+
+            if (!voiceClient.Started)
+            {
+                await voiceClient.StartAsync();
+            }
+
+            await player.StartAsync();
+        }
+    }
+
+    private static bool TryParseYtVideoId(string url, out VideoId videoId)
+    {
+        var result = VideoId.TryParse(url);
+
+        if (result.HasValue)
+        {
+            videoId = result.Value;
+            return true;
+        }
+
+        videoId = default;
+        return false;
     }
 
     public async Task StopAsync(ShardedCommandContext context)
     {
-        var player = GetOrCreatePlayerForContext(context);
+        if (!_playerManager.TryGetPlayerForGuild(context.Guild, out var player))
+        {
+            return;
+        }
 
-        await player.StopAsync();
+        await _playerManager.DestroyPlayerAsync(player);
 
         player.SongStarted -= SongStarted;
         player.SongFinished -= SongFinished;
         player.PlayerFinished -= PlayerFinished;
         player.PlayerException -= PlayerException;
 
-        _ = _players.TryRemove(context.Guild.Id, out _);
+        if (!_voiceClientManager.TryGetVoiceClientForGuild(context.Guild, out var voiceClient))
+        {
+            return;
+        }
+
+        await _voiceClientManager.DestroyClientAsync(voiceClient);
     }
 
     public static void SongStarted(AudioPlayer player)
@@ -129,13 +171,17 @@ public class AudioService
         _ = player.TextChannel.SendMessageAsync($"Current song finished.");
     }
 
-    public static void PlayerFinished(AudioPlayer player)
+    public void PlayerFinished(AudioPlayer player)
     {
         _ = player.TextChannel.SendMessageAsync($"Current queue finished, disconnected.");
+        _ = _playerManager.DestroyPlayerAsync(player);
     }
 
     public void PlayerException(AudioPlayer player, Exception exception)
     {
-        _logger.LogCritical(exception, $"Player for guild '{player.VoiceChannel.GuildId}' throws exception '{exception.Message}'");
+        var guildId = player.Guild.Id;
+        var message = exception.Message;
+
+        _logger.LogError(exception, "Player for guild '{GuildId}' throws exception '{Message}'", guildId, message);
     }
 }

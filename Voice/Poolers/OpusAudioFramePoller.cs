@@ -57,14 +57,14 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    public Task RunAsync(CancellationToken cancellationToken = default)
+    public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         if (_cts == null)
         {
             _cts = new();
         }
 
-        var startToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+        using var startToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
         _ = startToken.Token.Register(() =>
         {
@@ -79,7 +79,7 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
             FullMode = BoundedChannelFullMode.DropOldest,
         });
 
-        return Task.WhenAll(RunReaderAsync(), RunWriterAsync()).WaitAsync(startToken.Token);
+        await Task.WhenAll(RunReaderAsync(), RunWriterAsync()).WaitAsync(startToken.Token);
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
@@ -130,7 +130,7 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
                 {
                     if (_silenceFramesCount++ < MaxSilenceFrames)
                     {
-                        await WriteFrameAsync(Memory<byte>.Empty, _cts.Token);
+                        await WriteFrameAsync(SilencesFrames, _cts.Token);
                     }
 
                     nextTick += FrameMillis;
@@ -154,7 +154,7 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
         }
     }
 
-    private async ValueTask WriteFrameAsync(Memory<byte> frame, CancellationToken cancellationToken)
+    private async ValueTask WriteFrameAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {
         var packetArray = ArrayPool<byte>.Shared.Rent(_client.EncryptionMode.CalculatePacketSize());
 

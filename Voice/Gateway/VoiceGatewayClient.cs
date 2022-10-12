@@ -22,8 +22,6 @@ namespace DiscordAudioTests.Voice.Gateway;
 
 public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 {
-    private readonly ulong _guildId;
-    private readonly ulong _userId;
     private readonly UdpClient _udpClient = new();
     private readonly WebSocketClient _client;
     private readonly ILogger<VoiceGatewayClient> _logger;
@@ -38,6 +36,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private long _lastHeartbeatSent;
     private bool _shouldResume;
     private IPEndPoint _udpEndpoint;
+    private readonly OpusAudioFramePoller _framePoller;
 
     public VoiceGatewayClient(ulong guildId, ulong userId, string sessionId, string token, string endpoint, ILoggerFactory loggerFactory = null)
         : this(guildId, userId, loggerFactory)
@@ -49,8 +48,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     public VoiceGatewayClient(ulong guildId, ulong userId, ILoggerFactory loggerFactory = null)
     {
-        _guildId = guildId;
-        _userId = userId;
+        GuildId = guildId;
+        UserId = userId;
 
         _sendingChannel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(10)
         {
@@ -59,6 +58,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.DropOldest,
         });
+        _framePoller = new OpusAudioFramePoller(this, loggerFactory.CreateLogger<OpusAudioFramePoller>());
 
         loggerFactory ??= NullLoggerFactory.Instance;
         var uri = new Uri($"wss://{_endpoint.Replace(":80", string.Empty)}?v=4");
@@ -69,6 +69,12 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         _client.MessageReceived += MessageReceived;
         _client.ConnectionClosed += ConnectionClosed;
     }
+
+    public ulong GuildId { get; }
+
+    public ulong UserId { get; }
+
+    public ulong VoiceChannelId { get; private set; }
 
     public bool Started { get; private set; }
 
@@ -100,11 +106,11 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         return _client.StartAsync(cancellationToken);
     }
 
-    public Task RunAsync(CancellationToken cancellationToken = default)
+    public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         if (Started)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         if (AudioFrameSender == null)
@@ -114,10 +120,11 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
         Started = true;
 
-        var startToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+        using var startToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
         _ = Task.Run(StartHeartbeatAsync, _cts.Token);
-        return _client.RunAsync(startToken.Token);
+
+        await _client.RunAsync(startToken.Token);
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
@@ -127,8 +134,14 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
             return;
         }
 
+
         _client.MessageReceived -= MessageReceived;
         _client.ConnectionClosed -= ConnectionClosed;
+
+        _cts.Cancel(false);
+        _cts.Dispose();
+
+        await _framePoller.DisposeAsync();
 
         try
         {
@@ -136,10 +149,12 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         }
         catch { }
 
-        _cts.Cancel(false);
-        _cts.Dispose();
-
         await _client.StopAsync(cancellationToken);
+    }
+
+    public void SetVoiceChannel(ulong voiceChannelId)
+    {
+        VoiceChannelId = voiceChannelId;
     }
 
     public ValueTask SetConnectionInfoAsync(string sessionId, string token, string endpoint, CancellationToken cancellationToken = default)
@@ -149,16 +164,27 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
             return ValueTask.FromCanceled(cancellationToken);
         }
 
-        _sessionId = sessionId;
-        _token = token;
-        _endpoint = endpoint;
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            _sessionId = sessionId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            _token = token;
+        }
+
+        if (!string.IsNullOrWhiteSpace(endpoint))
+        {
+            _endpoint = endpoint;
+        }
 
         if (!Started)
         {
             return ValueTask.CompletedTask;
         }
 
-        _shouldResume = true;
+        _shouldResume = false;
 
         return _client.StopAsync(cancellationToken);
     }
@@ -171,6 +197,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         }
 
         var reconnectTokenIsSameAsCts = cancellationToken == _cts.Token;
+
+        await _framePoller.StopAsync(cancellationToken);
 
         _cts.Cancel(false);
         _cts = new();
@@ -193,11 +221,11 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         return SendPayloadAsync(speakingPayload);
     }
 
-    public ValueTask<int> SendFrameAsync(Memory<byte> frame, CancellationToken cancellationToken = default)
+    public async ValueTask<int> SendFrameAsync(Memory<byte> frame, CancellationToken cancellationToken = default)
     {
-        var frameToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+        using var frameToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
-        return _udpClient.SendAsync(frame, _udpEndpoint, frameToken.Token);
+        return await _udpClient.SendAsync(frame, _udpEndpoint, frameToken.Token);
     }
 
     public void SetAudioFrameSender(IAudioFrameSender audioFrameSender)
@@ -251,7 +279,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
         _logger.LogResuming();
 
-        var resumePayload = new Payload(PayloadOpcode.Resume, new ResumePayload(_guildId, _sessionId, _token));
+        var resumePayload = new Payload(PayloadOpcode.Resume, new ResumePayload(GuildId, _sessionId, _token));
 
         return SendPayloadAsync(resumePayload);
     }
@@ -260,7 +288,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     {
         _logger.LogIdentify();
 
-        var identityPayload = new Payload(PayloadOpcode.Identify, new IdentifyPayload(_guildId, _userId, _sessionId, _token));
+        var identityPayload = new Payload(PayloadOpcode.Identify, new IdentifyPayload(GuildId, UserId, _sessionId, _token));
 
         return SendPayloadAsync(identityPayload);
     }
@@ -350,7 +378,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         SecretKey = sessionDescriptionPayload.SecretKey;
         EncryptionMode = EncryptionModeExtensions.GetEncryptionMode(sessionDescriptionPayload.Mode);
 
-        return ValueTask.CompletedTask;
+        return _framePoller.StartAsync(_cts.Token);
     }
 
     private ValueTask HandleResumedAsync()

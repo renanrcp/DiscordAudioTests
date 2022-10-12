@@ -2,13 +2,11 @@
 // NextAudio licenses this file to you under the MIT license.
 
 using System;
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
-using Discord;
-using Discord.Audio;
 using Discord.WebSocket;
+using DiscordAudioTests.Voice.Poolers;
 using Microsoft.Extensions.Logging;
 
 using NextAudioStream = NextAudio.AudioStream;
@@ -20,31 +18,27 @@ public delegate void SongFinished(AudioPlayer player);
 public delegate void PlayerFinished(AudioPlayer player);
 public delegate void PlayerException(AudioPlayer player, Exception exception);
 
-public class AudioPlayer : IAsyncDisposable
+public class AudioPlayer : IAudioFrameSender, IAsyncDisposable
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly ILogger<AudioPlayer> _logger;
-    private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private readonly SemaphoreSlim _semaphore = new(0);
 
     private NextAudioStream _stream;
     private TaskCompletionSource _pauseTsc;
     private bool _isStarted;
-    private IAudioClient _audioClient;
 
-    public AudioPlayer(IVoiceChannel voiceChannel, ISocketMessageChannel textChannel, ILogger<AudioPlayer> logger)
+    public AudioPlayer(SocketTextChannel textChannel, ILogger<AudioPlayer> logger)
     {
-        VoiceChannel = voiceChannel;
         TextChannel = textChannel;
         _logger = logger;
     }
 
-    public IVoiceChannel VoiceChannel { get; }
-
-    public ISocketMessageChannel TextChannel { get; }
+    public SocketTextChannel TextChannel { get; }
 
     public ConcurrentQueue<NextAudioStream> Queue { get; } = new();
 
-    public IGuild Guild => VoiceChannel.Guild;
+    public SocketGuild Guild => TextChannel.Guild;
 
     public bool IsPaused => _pauseTsc != null;
 
@@ -56,7 +50,6 @@ public class AudioPlayer : IAsyncDisposable
 
     public bool Disposed { get; private set; }
 
-
     public event SongStarted SongStarted;
 
     public event SongFinished SongFinished;
@@ -65,8 +58,13 @@ public class AudioPlayer : IAsyncDisposable
 
     public event PlayerException PlayerException;
 
-    public ValueTask StartAsync()
+    public ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled(cancellationToken);
+        }
+
         if (IsStarted)
         {
             return ValueTask.CompletedTask;
@@ -74,24 +72,109 @@ public class AudioPlayer : IAsyncDisposable
 
         IsStarted = true;
 
-        _ = Task.Run(InternalRunAsync);
+        if (_stream == null && Queue.TryDequeue(out _stream))
+        {
+            SongStarted?.Invoke(this);
+        }
+
+        _ = _semaphore.Release();
 
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask PauseOrResumeAsync()
+    public async ValueTask<int> ProvideFrameAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        return PerformActionAsync(() =>
+        try
         {
-            if (!IsPaused)
+            using var frameToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+
+            if (IsPaused)
             {
-                _pauseTsc = new();
-                return;
+                await _pauseTsc.Task.WaitAsync(frameToken.Token);
             }
 
-            _ = _pauseTsc.TrySetResult();
-            _pauseTsc = null;
-        });
+            var bytesReaded = 0;
+
+            await PerformActionAsync(async () =>
+            {
+                while (!frameToken.Token.IsCancellationRequested && bytesReaded <= 0)
+                {
+                    bytesReaded = await _stream.ReadAsync(buffer, frameToken.Token);
+
+                    if (bytesReaded <= 0)
+                    {
+                        SongFinished?.Invoke(this);
+
+                        await _stream.DisposeAsync();
+                        _stream = null;
+
+                        if (!Queue.TryDequeue(out var stream))
+                        {
+                            return;
+                        }
+
+                        _stream = stream;
+
+                        SongStarted?.Invoke(this);
+                    }
+                }
+            }, cancellationToken);
+
+            if (bytesReaded <= 0)
+            {
+                PlayerFinished?.Invoke(this);
+                await StopAsync();
+            }
+
+            return bytesReaded;
+        }
+        catch (Exception ex)
+        {
+            if (ex is not OperationCanceledException)
+            {
+                PlayerException?.Invoke(this, ex);
+            }
+
+            if (_cts.IsCancellationRequested)
+            {
+                return 0;
+            }
+
+            if (_stream != null)
+            {
+                await _stream.DisposeAsync();
+                _stream = null;
+
+                SongFinished?.Invoke(this);
+
+                if (Queue.TryDequeue(out _stream))
+                {
+                    SongStarted.Invoke(this);
+                    return 0;
+                }
+            }
+
+            PlayerFinished?.Invoke(this);
+
+            return 0;
+        }
+    }
+
+    public ValueTask PauseOrResumeAsync(CancellationToken cancellationToken = default)
+    {
+        return !IsStarted
+            ? ValueTask.CompletedTask
+            : PerformActionAsync(() =>
+            {
+                if (!IsPaused)
+                {
+                    _pauseTsc = new();
+                    return;
+                }
+
+                _ = _pauseTsc.TrySetResult();
+                _pauseTsc = null;
+            }, cancellationToken);
     }
 
     public ValueTask StopAsync()
@@ -99,21 +182,21 @@ public class AudioPlayer : IAsyncDisposable
         return DisposeAsync();
     }
 
-    public ValueTask SeekAsync(TimeSpan seekTime)
+    public ValueTask SeekAsync(TimeSpan seekTime, CancellationToken cancellationToken = default)
     {
         return !IsStarted
             ? ValueTask.CompletedTask
             : PerformActionAsync(() =>
             {
                 throw new NotImplementedException();
-            });
+            }, cancellationToken);
     }
 
-    public ValueTask SkipAsync()
+    public ValueTask SkipAsync(CancellationToken cancellationToken = default)
     {
         return !IsStarted
             ? ValueTask.CompletedTask
-            : PerformActionAsync(() =>
+            : PerformActionAsync(async () =>
             {
                 if (!Queue.TryDequeue(out var stream))
                 {
@@ -122,26 +205,29 @@ public class AudioPlayer : IAsyncDisposable
 
                 if (_stream != null)
                 {
-                    _stream.Dispose();
+                    await _stream.DisposeAsync();
+                    SongFinished?.Invoke(this);
                 }
 
                 _stream = stream;
                 SongStarted?.Invoke(this);
-            });
+            }, cancellationToken);
     }
 
-    private ValueTask PerformActionAsync(Action action)
+    private ValueTask PerformActionAsync(Action action, CancellationToken cancellationToken)
     {
         return PerformActionAsync(() =>
         {
             action();
             return ValueTask.CompletedTask;
-        });
+        }, cancellationToken);
     }
 
-    private async ValueTask PerformActionAsync(Func<ValueTask> action)
+    private async ValueTask PerformActionAsync(Func<ValueTask> action, CancellationToken cancellationToken)
     {
-        await _semaphore.WaitAsync();
+        using var semaphoreToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+
+        await _semaphore.WaitAsync(semaphoreToken.Token);
 
         try
         {
@@ -150,76 +236,6 @@ public class AudioPlayer : IAsyncDisposable
         finally
         {
             _ = _semaphore.Release();
-        }
-    }
-
-
-    private async Task InternalRunAsync()
-    {
-        try
-        {
-            await SkipAsync();
-
-            _audioClient = await VoiceChannel.ConnectAsync();
-            using var outStream = new BufferedAudioStream(_audioClient.CreateDirectOpusStream(), _audioClient, 1000, CancellationToken.None);
-
-            using var memoryOwner = MemoryPool<byte>.Shared.Rent(1024);
-
-            var maxBufferLength = 0;
-            var finished = false;
-
-            while (!_cts.Token.IsCancellationRequested && !finished)
-            {
-                if (IsPaused)
-                {
-                    await _pauseTsc.Task;
-                }
-
-                await PerformActionAsync(async () =>
-                {
-                    var bytesRead = await _stream.ReadAsync(memoryOwner.Memory);
-
-                    if (bytesRead <= 0)
-                    {
-                        SongFinished.Invoke(this);
-
-                        if (!Queue.TryDequeue(out var stream))
-                        {
-                            finished = true;
-                            PlayerFinished?.Invoke(this);
-                            return;
-                        }
-
-                        _stream.Dispose();
-
-                        _stream = stream;
-
-                        SongStarted.Invoke(this);
-
-                        return;
-                    }
-
-                    if (bytesRead > maxBufferLength)
-                    {
-                        maxBufferLength = bytesRead;
-                    }
-
-                    _logger.LogDebug($"Readed {bytesRead} bytes for guild: {Guild.Name}.");
-                    await outStream.WriteAsync(memoryOwner.Memory[..bytesRead], _cts.Token);
-                });
-            }
-
-            _logger.LogInformation($"The max buffer length was {maxBufferLength} for guild: {Guild.Name}.");
-
-            await outStream.FlushAsync();
-        }
-        catch (Exception ex)
-        {
-            PlayerException?.Invoke(this, ex);
-        }
-        finally
-        {
-            await StopAsync();
         }
     }
 
@@ -236,19 +252,12 @@ public class AudioPlayer : IAsyncDisposable
         _cts.Cancel(false);
         _cts.Dispose();
 
-        _stream.Dispose();
+        if (_stream != null)
+        {
+            await _stream.DisposeAsync();
+        }
+
         _semaphore.Dispose();
-
-        if (IsStarted)
-        {
-            await VoiceChannel.DisconnectAsync();
-        }
-
-        if (_audioClient != null)
-        {
-            _audioClient.Dispose();
-        }
-
 
         foreach (var stream in Queue)
         {
