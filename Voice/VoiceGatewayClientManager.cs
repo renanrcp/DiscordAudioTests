@@ -111,7 +111,7 @@ public sealed class VoiceGatewayClientManager : IAsyncDisposable
 
         Task OnUserVoiceStateUpdatedLocal(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
         {
-            if (user is IGuildUser guildUser && guildUser.Guild.Id == voiceChannel.GuildId)
+            if (user.Id == _client.CurrentUser.Id && user is IGuildUser guildUser && guildUser.Guild.Id == voiceChannel.GuildId)
             {
                 if (newState.VoiceChannel?.Id == voiceChannel.Id)
                 {
@@ -124,7 +124,7 @@ public sealed class VoiceGatewayClientManager : IAsyncDisposable
 
         Task OnVoiceServerUpdatedLocal(SocketVoiceServer data)
         {
-            if (data.Guild.Id == voiceChannel.Id)
+            if (data.Guild.Id == voiceChannel.GuildId)
             {
                 _ = voiceServerTsc.TrySetResult(data);
             }

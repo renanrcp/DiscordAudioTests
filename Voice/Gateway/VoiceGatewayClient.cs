@@ -3,12 +3,12 @@
 
 using System;
 using System.Buffers;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using DiscordAudioTests.Voice.Encrypt;
 using DiscordAudioTests.Voice.Event;
@@ -26,7 +26,6 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private readonly WebSocketClient _client;
     private readonly ILogger<VoiceGatewayClient> _logger;
     private readonly SemaphoreSlim _heartbeatLock = new(0);
-    private readonly Channel<ReadOnlyMemory<byte>> _sendingChannel;
 
     private CancellationTokenSource _cts = new();
     private string _sessionId;
@@ -50,20 +49,11 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     {
         GuildId = guildId;
         UserId = userId;
-
-        _sendingChannel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(10)
-        {
-            AllowSynchronousContinuations = true,
-            SingleReader = true,
-            SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropOldest,
-        });
         _framePoller = new OpusAudioFramePoller(this, loggerFactory.CreateLogger<OpusAudioFramePoller>());
 
         loggerFactory ??= NullLoggerFactory.Instance;
-        var uri = new Uri($"wss://{_endpoint.Replace(":80", string.Empty)}?v=4");
 
-        _client = new(uri, loggerFactory.CreateLogger<WebSocketClient>());
+        _client = new(loggerFactory.CreateLogger<WebSocketClient>());
         _logger = loggerFactory.CreateLogger<VoiceGatewayClient>();
 
         _client.MessageReceived += MessageReceived;
@@ -103,7 +93,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         Started = true;
 
         _ = Task.Run(StartHeartbeatAsync, _cts.Token);
-        return _client.StartAsync(cancellationToken);
+
+        return _client.StartAsync(GetUri(), cancellationToken);
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -122,9 +113,9 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
         using var startToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
-        _ = Task.Run(StartHeartbeatAsync, _cts.Token);
+        _ = Task.Run(StartHeartbeatAsync, startToken.Token);
 
-        await _client.RunAsync(startToken.Token);
+        await _client.RunAsync(GetUri(), startToken.Token);
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
@@ -208,8 +199,10 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
             cancellationToken = _cts.Token;
         }
 
+        Started = false;
+
         await _heartbeatLock.WaitAsync(cancellationToken);
-        await _client.StartAsync(cancellationToken);
+        await StartAsync(cancellationToken);
 
         return true;
     }
@@ -230,7 +223,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     public void SetAudioFrameSender(IAudioFrameSender audioFrameSender)
     {
-        if (AudioFrameSender == null)
+        if (audioFrameSender == null)
         {
             return;
         }
@@ -238,21 +231,14 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         AudioFrameSender = audioFrameSender;
     }
 
-    private async ValueTask SendMessageAsync(ReadOnlyMemory<byte> buffer)
+    private Uri GetUri()
     {
-        // Try write the buffer if has any space available in channel
-        if (!_sendingChannel.Writer.TryWrite(buffer))
-        {
-            // If not wait for release a space.
-            while (await _sendingChannel.Writer.WaitToWriteAsync(_cts.Token))
-            {
-                // If can write the buffer release this valuetask, if not try again.
-                if (_sendingChannel.Writer.TryWrite(buffer))
-                {
-                    return;
-                }
-            }
-        }
+        return new Uri($"wss://{_endpoint.Replace(":80", string.Empty)}?v=4");
+    }
+
+    private ValueTask SendMessageAsync(ReadOnlyMemory<byte> buffer)
+    {
+        return _client.SendAsync(buffer, _cts.Token);
     }
 
     private ValueTask SendPayloadAsync(Payload payload)
@@ -368,14 +354,14 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
         _heartbeatInterval = TimeSpan.FromMilliseconds(helloPayload.HeartbeatInterval);
 
-        _ = _heartbeatLock.Release();
-
         return _shouldResume ? SendResumeAsync() : SendIdentifyAsync();
     }
 
     private ValueTask HandleSessionDescriptionAsync(SessionDescriptionPayload sessionDescriptionPayload)
     {
-        SecretKey = sessionDescriptionPayload.SecretKey;
+        // Unfortunatelly STJ cannot serialize a byte array (why?)
+        // We need to cast the serialized type to a byte array.
+        SecretKey = sessionDescriptionPayload.SecretKey.ToArray();
         EncryptionMode = EncryptionModeExtensions.GetEncryptionMode(sessionDescriptionPayload.Mode);
 
         return _framePoller.StartAsync(_cts.Token);
@@ -398,11 +384,12 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private async ValueTask HandleReadyAsync(ReadyPayload readyPayload)
     {
+        _ = _heartbeatLock.Release();
+
         Ssrc = readyPayload.Ssrc;
         _udpEndpoint = new(IPAddress.Parse(readyPayload.Ip), readyPayload.Port);
 
         var ssrcBytes = BitConverter.GetBytes(Ssrc);
-
         using var ipDiscoveryMemoryOwner = MemoryPool<byte>.Shared.Rent(70);
 
         ssrcBytes.CopyTo(ipDiscoveryMemoryOwner.Memory);
@@ -433,6 +420,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
                 await SendClientConnectedAsync();
 
                 _logger.LogWaitingSessionDescription();
+
+                return;
             }
         }
     }
@@ -455,11 +444,11 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
             try
             {
-                await Task.Delay(_heartbeatInterval, _cts.Token);
-
                 _lastHeartbeatSent = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
                 await SendHeartbeatAsync(_lastHeartbeatSent);
+
+                await Task.Delay(_heartbeatInterval, _cts.Token);
             }
             finally
             {

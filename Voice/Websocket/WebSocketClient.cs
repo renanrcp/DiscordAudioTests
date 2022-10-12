@@ -13,8 +13,6 @@ namespace DiscordAudioTests.Voice.Websocket;
 
 public sealed class WebSocketClient : IDisposable, IAsyncDisposable
 {
-    private readonly Uri _uri;
-
     private const int RECOMMENDED_BUFFER_SIZE = 1024 * 16;
 
     public event AsyncEventHandler<MessageReceivedEventArgs> MessageReceived;
@@ -26,25 +24,24 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
 
     private ClientWebSocket _client;
 
-    public WebSocketClient(Uri uri, ILogger<WebSocketClient> logger)
+    public WebSocketClient(ILogger<WebSocketClient> logger)
     {
-        _uri = uri;
         _logger = logger;
     }
 
-    public ValueTask StartAsync(CancellationToken cancellationToken = default)
+    public ValueTask StartAsync(Uri uri, CancellationToken cancellationToken = default)
     {
         if (_client != null)
         {
             return ValueTask.CompletedTask;
         }
 
-        _ = Task.Run(() => RunAsync(cancellationToken), cancellationToken);
+        _ = Task.Run(() => RunAsync(uri, cancellationToken), cancellationToken);
 
         return ValueTask.CompletedTask;
     }
 
-    public async Task RunAsync(CancellationToken cancellationToken = default)
+    public async Task RunAsync(Uri uri, CancellationToken cancellationToken = default)
     {
         if (_client != null)
         {
@@ -55,9 +52,9 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
 
         try
         {
-            _logger.LogConnecting(_uri);
+            _logger.LogConnecting(uri);
 
-            await _client.ConnectAsync(_uri, cancellationToken);
+            await _client.ConnectAsync(uri, cancellationToken);
 
             using var memoryOwner = MemoryPool<byte>.Shared.Rent(RECOMMENDED_BUFFER_SIZE);
             var bytesReaded = 0;
@@ -65,6 +62,8 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 var result = await _client.ReceiveAsync(memoryOwner.Memory[bytesReaded..], cancellationToken);
+
+                bytesReaded += result.Count;
 
                 if (!result.EndOfMessage)
                 {
@@ -78,7 +77,10 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
 
                 if (MessageReceived != null)
                 {
-                    var messageReceivedEvent = new MessageReceivedEventArgs(memoryOwner.Memory[bytesReaded..]);
+                    var messageReceivedEvent = new MessageReceivedEventArgs(memoryOwner.Memory[..bytesReaded]);
+
+                    bytesReaded = 0;
+
                     await MessageReceived.InvokeAllAsync(messageReceivedEvent, cancellationToken);
                 }
             }
@@ -108,14 +110,6 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
         }
         finally
         {
-            try
-            {
-                _client.Dispose();
-            }
-            catch { }
-
-            _client = null;
-
             if (ConnectionClosed != null)
             {
                 var closedEvent = new ConnectionClosedEventArgs(_client.CloseStatus, _client.CloseStatusDescription);
@@ -126,6 +120,14 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
 
                 await ConnectionClosed.InvokeAllAsync(closedEvent, closedCancelToken);
             }
+
+            try
+            {
+                _client.Dispose();
+            }
+            catch { }
+
+            _client = null;
         }
     }
 
@@ -148,6 +150,8 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
                 var endBufferPos = Math.Min(bytesWritten + recomendedSendBufferSize, buffer.Length);
                 var sendBuffer = buffer.Slice(bytesWritten, endBufferPos);
                 var endOfMessage = bytesWritten + endBufferPos >= buffer.Length;
+
+                bytesWritten += sendBuffer.Length;
 
                 await _client.SendAsync(sendBuffer, WebSocketMessageType.Text, endOfMessage, cancellationToken);
             }
