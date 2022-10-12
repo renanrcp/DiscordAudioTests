@@ -55,6 +55,11 @@ public static class Sodium
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "crypto_secretbox_easy")]
     private static extern unsafe int _SodiumSecretBoxCreate(byte* buffer, byte* message, ulong messageLength, byte* nonce, byte* key);
 
+    public static int CalculateTargetSize(ReadOnlySpan<byte> source)
+    {
+        return source.Length + MacSize;
+    }
+
     public static void Encrypt(ReadOnlySpan<byte> source, Span<byte> target, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> key)
     {
         if (nonce.Length != NonceSize)

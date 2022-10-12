@@ -8,9 +8,9 @@ namespace DiscordAudioTests.Voice.Encrypt;
 
 public static class XSalsa20Poly1305LiteEncryptionMode
 {
-    public static int CalculatePacketSize()
+    public static int CalculatePacketSize(int encryptionLength)
     {
-        return Rtp.HeaderSize + Rtp.GetEncryptionLength() + 4;
+        return Rtp.HeaderSize + encryptionLength + 4;
     }
 
     public static void GenerateNonce(uint nonce, Span<byte> target)

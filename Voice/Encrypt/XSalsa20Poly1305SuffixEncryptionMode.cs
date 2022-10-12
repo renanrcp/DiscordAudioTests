@@ -9,9 +9,9 @@ namespace DiscordAudioTests.Voice.Encrypt;
 
 public static class XSalsa20Poly1305SuffixEncryptionMode
 {
-    public static int CalculatePacketSize()
+    public static int CalculatePacketSize(int encryptionLength)
     {
-        return Rtp.HeaderSize + Rtp.GetEncryptionLength() + Sodium.NonceSize;
+        return Rtp.HeaderSize + encryptionLength + Sodium.NonceSize;
     }
 
     public static void GenerateNonce(Span<byte> target)

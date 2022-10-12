@@ -8,7 +8,8 @@ namespace DiscordAudioTests.Voice.Models;
 [Flags]
 public enum SpeakingMask
 {
-    Normal = 1,
-    SOUNDSHARE = 1 << 1,
-    PRIORITY = 1 << 2,
+    None = 0,
+    Microphone = 1 << 0,
+    Soundshare = 1 << 1,
+    Priority = 1 << 2,
 }

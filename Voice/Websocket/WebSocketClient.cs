@@ -39,12 +39,12 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
             return ValueTask.CompletedTask;
         }
 
-        _ = Task.Run(() => StartAndBlockAsync(cancellationToken), cancellationToken);
+        _ = Task.Run(() => RunAsync(cancellationToken), cancellationToken);
 
         return ValueTask.CompletedTask;
     }
 
-    public async Task StartAndBlockAsync(CancellationToken cancellationToken = default)
+    public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         if (_client != null)
         {

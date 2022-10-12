@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using DiscordAudioTests.Voice.Encrypt;
 using DiscordAudioTests.Voice.Event;
 using DiscordAudioTests.Voice.Models;
+using DiscordAudioTests.Voice.Poolers;
 using DiscordAudioTests.Voice.Websocket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -37,9 +38,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private long _lastHeartbeatSent;
     private bool _shouldResume;
     private IPEndPoint _udpEndpoint;
-    private uint _ssrc;
-    private byte[] _secretKey;
-    private EncryptionMode _encryptionMode;
+    private readonly TaskCompletionSource _audioFrameSenderTsc = new();
+    private IAudioFrameSender _audioFrameSender;
 
     public VoiceGatewayClient(ulong guildId, ulong userId, string sessionId, string token, string endpoint, ILoggerFactory loggerFactory = null)
         : this(guildId, userId, loggerFactory)
@@ -76,6 +76,24 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     public long Ping { get; private set; }
 
+    public EncryptionMode EncryptionMode { get; private set; }
+
+    public ReadOnlyMemory<byte> SecretKey { get; private set; }
+
+    public uint Ssrc { get; private set; }
+
+    internal Task AudioFrameSenderTask => _audioFrameSenderTsc.Task;
+
+    public IAudioFrameSender AudioFrameSender
+    {
+        get => _audioFrameSender;
+        set
+        {
+            _audioFrameSender = value;
+            _ = _audioFrameSenderTsc.TrySetResult();
+        }
+    }
+
     public ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         if (Started)
@@ -89,7 +107,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         return _client.StartAsync(cancellationToken);
     }
 
-    public Task StartAndBlockAsync(CancellationToken cancellationToken = default)
+    public Task RunAsync(CancellationToken cancellationToken = default)
     {
         if (Started)
         {
@@ -101,7 +119,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         var startToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
         _ = Task.Run(StartHeartbeatAsync, _cts.Token);
-        return StartAndBlockAsync(startToken.Token);
+        return _client.RunAsync(startToken.Token);
     }
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
@@ -172,9 +190,16 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     public ValueTask SendSpeakingAsync(SpeakingMask speakingMask)
     {
-        var speakingPayload = new Payload(PayloadOpcode.Speaking, new SpeakingPayload(_ssrc, (int)speakingMask));
+        var speakingPayload = new Payload(PayloadOpcode.Speaking, new SpeakingPayload(Ssrc, (int)speakingMask));
 
         return SendPayloadAsync(speakingPayload);
+    }
+
+    public ValueTask<int> SendFrameAsync(Memory<byte> frame, CancellationToken cancellationToken = default)
+    {
+        var frameToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
+
+        return _udpClient.SendAsync(frame, _udpEndpoint, frameToken.Token);
     }
 
     private async ValueTask SendMessageAsync(ReadOnlyMemory<byte> buffer)
@@ -248,7 +273,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private ValueTask SendClientConnectedAsync()
     {
-        var clientConnectedPayload = new Payload(PayloadOpcode.ClientConnect, new ClientConnectPayload(_ssrc));
+        var clientConnectedPayload = new Payload(PayloadOpcode.ClientConnect, new ClientConnectPayload(Ssrc));
 
         return SendPayloadAsync(clientConnectedPayload);
     }
@@ -314,8 +339,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private ValueTask HandleSessionDescriptionAsync(SessionDescriptionPayload sessionDescriptionPayload)
     {
-        _secretKey = sessionDescriptionPayload.SecretKey;
-        _encryptionMode = EncryptionModeExtensions.GetEncryptionMode(sessionDescriptionPayload.Mode);
+        SecretKey = sessionDescriptionPayload.SecretKey;
+        EncryptionMode = EncryptionModeExtensions.GetEncryptionMode(sessionDescriptionPayload.Mode);
 
         return ValueTask.CompletedTask;
     }
@@ -337,10 +362,10 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private async ValueTask HandleReadyAsync(ReadyPayload readyPayload)
     {
-        _ssrc = readyPayload.Ssrc;
+        Ssrc = readyPayload.Ssrc;
         _udpEndpoint = new(IPAddress.Parse(readyPayload.Ip), readyPayload.Port);
 
-        var ssrcBytes = BitConverter.GetBytes(_ssrc);
+        var ssrcBytes = BitConverter.GetBytes(Ssrc);
 
         using var ipDiscoveryMemoryOwner = MemoryPool<byte>.Shared.Rent(70);
 

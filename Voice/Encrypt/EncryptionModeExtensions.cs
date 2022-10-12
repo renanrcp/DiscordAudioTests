@@ -36,11 +36,16 @@ public static class EncryptionModeExtensions
 
     public static int CalculatePacketSize(this EncryptionMode mode)
     {
+        return CalculatePacketSize(mode, Rtp.GetEncryptionLength());
+    }
+
+    public static int CalculatePacketSize(this EncryptionMode mode, int encryptionLength)
+    {
         return mode switch
         {
-            EncryptionMode.XSalsa20Poly1305EncryptionMode => XSalsa20Poly1305EncryptionMode.CalculatePacketSize(),
-            EncryptionMode.XSalsa20Poly1305LiteEncryptionMode => XSalsa20Poly1305LiteEncryptionMode.CalculatePacketSize(),
-            EncryptionMode.XSalsa20Poly1305SuffixEncryptionMode => XSalsa20Poly1305SuffixEncryptionMode.CalculatePacketSize(),
+            EncryptionMode.XSalsa20Poly1305EncryptionMode => XSalsa20Poly1305EncryptionMode.CalculatePacketSize(encryptionLength),
+            EncryptionMode.XSalsa20Poly1305LiteEncryptionMode => XSalsa20Poly1305LiteEncryptionMode.CalculatePacketSize(encryptionLength),
+            EncryptionMode.XSalsa20Poly1305SuffixEncryptionMode => XSalsa20Poly1305SuffixEncryptionMode.CalculatePacketSize(encryptionLength),
             _ => 0,
         };
     }
