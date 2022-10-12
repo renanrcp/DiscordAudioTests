@@ -198,8 +198,6 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
 
     private async Task RunWriterAsync()
     {
-        await _client.AudioFrameSenderTask.WaitAsync(_cts.Token);
-
         while (!_cts.Token.IsCancellationRequested)
         {
             var memoryOwner = MemoryPool<byte>.Shared.Rent(1024);

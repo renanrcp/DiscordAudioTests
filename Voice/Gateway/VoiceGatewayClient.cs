@@ -38,8 +38,6 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
     private long _lastHeartbeatSent;
     private bool _shouldResume;
     private IPEndPoint _udpEndpoint;
-    private readonly TaskCompletionSource _audioFrameSenderTsc = new();
-    private IAudioFrameSender _audioFrameSender;
 
     public VoiceGatewayClient(ulong guildId, ulong userId, string sessionId, string token, string endpoint, ILoggerFactory loggerFactory = null)
         : this(guildId, userId, loggerFactory)
@@ -82,23 +80,18 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     public uint Ssrc { get; private set; }
 
-    internal Task AudioFrameSenderTask => _audioFrameSenderTsc.Task;
-
-    public IAudioFrameSender AudioFrameSender
-    {
-        get => _audioFrameSender;
-        set
-        {
-            _audioFrameSender = value;
-            _ = _audioFrameSenderTsc.TrySetResult();
-        }
-    }
+    public IAudioFrameSender AudioFrameSender { get; private set; }
 
     public ValueTask StartAsync(CancellationToken cancellationToken = default)
     {
         if (Started)
         {
             return ValueTask.CompletedTask;
+        }
+
+        if (AudioFrameSender == null)
+        {
+            throw new InvalidOperationException($"Cannot start voice gateway without set an '{nameof(AudioFrameSender)}'.");
         }
 
         Started = true;
@@ -112,6 +105,11 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         if (Started)
         {
             return Task.CompletedTask;
+        }
+
+        if (AudioFrameSender == null)
+        {
+            throw new InvalidOperationException($"Cannot start voice gateway without set an '{nameof(AudioFrameSender)}'.");
         }
 
         Started = true;
@@ -200,6 +198,16 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         var frameToken = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
 
         return _udpClient.SendAsync(frame, _udpEndpoint, frameToken.Token);
+    }
+
+    public void SetAudioFrameSender(IAudioFrameSender audioFrameSender)
+    {
+        if (AudioFrameSender == null)
+        {
+            return;
+        }
+
+        AudioFrameSender = audioFrameSender;
     }
 
     private async ValueTask SendMessageAsync(ReadOnlyMemory<byte> buffer)
