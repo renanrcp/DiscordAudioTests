@@ -175,10 +175,16 @@ public class AudioService
     {
         _ = player.TextChannel.SendMessageAsync($"Current queue finished, disconnected.");
         _ = _playerManager.DestroyPlayerAsync(player);
+        _ = _voiceClientManager.DestroyClientForGuildAsync(player.Guild);
     }
 
     public void PlayerException(AudioPlayer player, Exception exception)
     {
+        if (exception is OperationCanceledException)
+        {
+            return;
+        }
+
         var guildId = player.Guild.Id;
         var message = exception.Message;
 
