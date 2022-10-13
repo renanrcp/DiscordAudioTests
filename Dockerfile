@@ -15,9 +15,5 @@ RUN dotnet publish "DiscordAudioTests.csproj" -c Release -o /app/publish /p:UseA
 FROM base AS final
 WORKDIR /app
 
-RUN set -xe; \
-  apt-get update; \
-  apt-get install -y --no-install-recommends opus-tools libopus0 libopus-dev libsodium23 libsodium-dev curl
-
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "DiscordAudioTests.dll"]
