@@ -39,7 +39,7 @@ public sealed class VoiceGatewayClientManager : IAsyncDisposable
     {
         var guild = await voiceServer.Guild.GetOrDownloadAsync();
 
-        if (!TryGetVoiceClientForGuild(guild, out var voiceClient))
+        if (!TryGetVoiceClientForGuild(guild, out var voiceClient) || !voiceClient.Started)
         {
             return;
         }
