@@ -35,16 +35,11 @@ public sealed class VoiceGatewayClientManager : IAsyncDisposable
         return !TryGetVoiceClientForGuild(guild, out var voiceClient) ? Task.CompletedTask : DestroyClientAsync(voiceClient);
     }
 
-    private async Task OnVoiceServerUpdated(SocketVoiceServer voiceServer)
+    private Task OnVoiceServerUpdated(SocketVoiceServer voiceServer)
     {
-        var guild = await voiceServer.Guild.GetOrDownloadAsync();
-
-        if (!TryGetVoiceClientForGuild(guild, out var voiceClient) || !voiceClient.Started)
-        {
-            return;
-        }
-
-        await voiceClient.SetConnectionInfoAsync(null, voiceServer.Token, voiceServer.Endpoint);
+        return !TryGetVoiceClientForGuild(voiceServer.Guild.Id, out var voiceClient) || !voiceClient.Started
+            ? Task.CompletedTask
+            : voiceClient.SetConnectionInfoAsync(null, voiceServer.Token, voiceServer.Endpoint).AsTask();
     }
 
     private Task OnUserVoiceStateUpdated(SocketUser user, SocketVoiceState oldState, SocketVoiceState newState)
