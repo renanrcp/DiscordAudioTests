@@ -85,6 +85,19 @@ public class AudioService
     {
         var player = GetOrCreatePlayerForContext(context);
 
+        if (player.Disposed)
+        {
+            player.SongStarted -= SongStarted;
+            player.SongFinished -= SongFinished;
+            player.PlayerFinished -= PlayerFinished;
+            player.PlayerException -= PlayerException;
+
+            await _playerManager.DestroyPlayerAsync(player);
+            await _voiceClientManager.DestroyClientForGuildAsync(context.Guild);
+
+            player = GetOrCreatePlayerForContext(context);
+        }
+
         AudioStream sourceStream;
 
         if (TryParseYtVideoId(url, out var ytVideoId))

@@ -129,8 +129,17 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         _client.MessageReceived -= MessageReceived;
         _client.ConnectionClosed -= ConnectionClosed;
 
-        _cts.Cancel(false);
-        _cts.Dispose();
+        try
+        {
+            if (_cts == null)
+            {
+                return;
+            }
+
+            _cts.Cancel(false);
+            _cts.Dispose();
+        }
+        catch { }
 
         await _framePoller.DisposeAsync();
 
@@ -150,6 +159,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     public ValueTask SetConnectionInfoAsync(string sessionId, string token, string endpoint, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Connection info updated.");
+
         if (cancellationToken.IsCancellationRequested)
         {
             return ValueTask.FromCanceled(cancellationToken);
@@ -170,41 +181,50 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
             _endpoint = endpoint;
         }
 
-        if (!Started)
-        {
-            return ValueTask.CompletedTask;
-        }
-
         _shouldResume = false;
 
-        return _client.StopAsync(cancellationToken);
+        return !Started ? ValueTask.CompletedTask : _client.StopAsync(cancellationToken);
     }
 
     public async ValueTask<bool> TryReconnectAsync(CancellationToken cancellationToken = default)
     {
-        if (_cts.Token.IsCancellationRequested || !_shouldResume)
+        var ctsCancelled = _cts?.Token.IsCancellationRequested == true;
+        _logger.LogInformation("Trying reconnecting cts is '{ctsCancelled}' and shouldResume is '{shouldResume}'", ctsCancelled, _shouldResume);
+
+        if (ctsCancelled || !_shouldResume)
         {
             return false;
         }
 
-        var reconnectTokenIsSameAsCts = cancellationToken == _cts.Token;
-
-        await _framePoller.StopAsync(cancellationToken);
-
-        _cts.Cancel(false);
-        _cts = new();
-
-        if (reconnectTokenIsSameAsCts)
+        try
         {
-            cancellationToken = _cts.Token;
+            var reconnectTokenIsSameAsCts = cancellationToken == _cts.Token;
+
+            await _framePoller.StopAsync(cancellationToken);
+
+            _cts.Cancel(false);
+            _cts = new();
+
+            if (reconnectTokenIsSameAsCts)
+            {
+                cancellationToken = _cts.Token;
+            }
+
+            Started = false;
+
+            await _heartbeatLock.WaitAsync(cancellationToken);
+            await StartAsync(cancellationToken);
+
+            _logger.LogInformation("Sucessfully started client again.");
+
+            return true;
         }
-
-        Started = false;
-
-        await _heartbeatLock.WaitAsync(cancellationToken);
-        await StartAsync(cancellationToken);
-
-        return true;
+        catch (Exception ex)
+        {
+            var message = ex.Message;
+            _logger.LogCritical(ex, "Exception when trying reconnect: {message}", message);
+            return false;
+        }
     }
 
     public ValueTask SendSpeakingAsync(SpeakingMask speakingMask)
@@ -302,7 +322,12 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private async Task ConnectionClosed(ConnectionClosedEventArgs e)
     {
-        if (await TryReconnectAsync(_cts.Token))
+        if (_cts == null)
+        {
+            _logger.LogCritical("Tried reconnect but cts is null.");
+        }
+
+        if (_cts != null && await TryReconnectAsync(_cts.Token))
         {
             return;
         }

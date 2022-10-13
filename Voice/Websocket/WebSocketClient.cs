@@ -110,7 +110,11 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
         }
         finally
         {
-            if (ConnectionClosed != null)
+            if (ConnectionClosed == null)
+            {
+                DisposeClient();
+            }
+            else
             {
                 var closedEvent = new ConnectionClosedEventArgs(_client.CloseStatus, _client.CloseStatusDescription);
 
@@ -118,17 +122,27 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
                     ? CancellationToken.None
                     : cancellationToken;
 
+                DisposeClient();
+
                 await ConnectionClosed.InvokeAllAsync(closedEvent, closedCancelToken);
             }
-
-            try
-            {
-                _client.Dispose();
-            }
-            catch { }
-
-            _client = null;
         }
+    }
+
+    private void DisposeClient()
+    {
+        if (_client == null)
+        {
+            return;
+        }
+
+        try
+        {
+            _client.Dispose();
+        }
+        catch { }
+
+        _client = null;
     }
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
@@ -177,13 +191,7 @@ public sealed class WebSocketClient : IDisposable, IAsyncDisposable
         catch { }
         finally
         {
-            try
-            {
-                _client.Dispose();
-            }
-            catch { }
-
-            _client = null;
+            DisposeClient();
         }
     }
 
