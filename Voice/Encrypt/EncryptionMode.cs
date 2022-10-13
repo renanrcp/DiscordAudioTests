@@ -5,7 +5,7 @@ namespace DiscordAudioTests.Voice.Encrypt;
 
 public enum EncryptionMode
 {
-    XSalsa20Poly1305EncryptionMode,
-    XSalsa20Poly1305LiteEncryptionMode,
-    XSalsa20Poly1305SuffixEncryptionMode,
+    XSalsa20Poly1305,
+    XSalsa20Poly1305Lite,
+    XSalsa20Poly1305Suffix,
 }

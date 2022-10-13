@@ -34,15 +34,10 @@ public static class Sodium
 {
     private const string LibraryName = "libsodium";
 
-    public static int KeySize { get; } = (int)_SodiumSecretBoxKeySize();
-
     public static int NonceSize { get; } = (int)_SodiumSecretBoxNonceSize();
 
     public static int MacSize { get; } = (int)_SodiumSecretBoxMacSize();
 
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "crypto_secretbox_xsalsa20poly1305_keybytes")]
-    [return: MarshalAs(UnmanagedType.SysUInt)]
-    private static extern UIntPtr _SodiumSecretBoxKeySize();
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "crypto_secretbox_xsalsa20poly1305_noncebytes")]
     [return: MarshalAs(UnmanagedType.SysUInt)]
@@ -55,26 +50,21 @@ public static class Sodium
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "crypto_secretbox_easy")]
     private static extern unsafe int _SodiumSecretBoxCreate(byte* buffer, byte* message, ulong messageLength, byte* nonce, byte* key);
 
-    public static int CalculateTargetSize(ReadOnlySpan<byte> source)
+    public static int CalculateTargetSize(int length)
     {
-        return source.Length + MacSize;
+        return length + MacSize;
     }
 
     public static void Encrypt(ReadOnlySpan<byte> source, Span<byte> target, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> key)
     {
-        if (nonce.Length != NonceSize)
-        {
-            throw new ArgumentException($"Invalid nonce size. Nonce needs to have a length of {NonceSize} bytes.", nameof(nonce));
-        }
-
         if (target.Length != MacSize + source.Length)
         {
             throw new ArgumentException($"Invalid target buffer size. Target buffer needs to have a length that is a sum of input buffer length and Sodium MAC size ({MacSize} bytes).", nameof(target));
         }
 
-        int result;
+        var result = EncryptInternal(source, target, key, nonce);
 
-        if ((result = EncryptInternal(source, target, key, nonce)) != 0)
+        if (result != 0)
         {
             throw new CryptographicException($"Could not encrypt the buffer. Sodium returned code {result}.");
         }
@@ -83,6 +73,7 @@ public static class Sodium
     private static unsafe int EncryptInternal(ReadOnlySpan<byte> source, Span<byte> target, ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce)
     {
         var status = 0;
+
         fixed (byte* sourcePtr = &source.GetPinnableReference())
         fixed (byte* targetPtr = &target.GetPinnableReference())
         fixed (byte* keyPtr = &key.GetPinnableReference())

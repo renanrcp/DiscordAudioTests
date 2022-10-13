@@ -33,7 +33,7 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
     private int _silenceFramesCount;
     private ushort _seq;
     private uint _timestamp;
-    private uint _nonce;
+    private readonly SemaphoreSlim _queueLock = new(QueueLength, QueueLength);
 
     public OpusAudioFramePoller(VoiceGatewayClient client, ILogger<OpusAudioFramePoller> logger)
     {
@@ -76,7 +76,7 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
             AllowSynchronousContinuations = false,
             SingleReader = true,
             SingleWriter = true,
-            FullMode = BoundedChannelFullMode.DropOldest,
+            FullMode = BoundedChannelFullMode.Wait,
         });
 
         await Task.WhenAll(RunReaderAsync(), RunWriterAsync()).WaitAsync(startToken.Token);
@@ -107,62 +107,78 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
 
     private async Task RunReaderAsync()
     {
-        await _preloadedTsc.Task.WaitAsync(_cts.Token);
-
-        await _client.SendSpeakingAsync(SpeakingMask.Microphone);
-
-        long nextTick = Environment.TickCount;
-
-        while (!_cts.Token.IsCancellationRequested)
+        try
         {
-            long tick = Environment.TickCount;
-            var dist = nextTick - tick;
+            await _preloadedTsc.Task.WaitAsync(_cts.Token);
 
-            if (dist > 0)
-            {
-                await Task.Delay((int)dist, _cts.Token);
-                continue;
-            }
+            await _client.SendSpeakingAsync(SpeakingMask.Microphone);
 
-            if (!_sendingChannel.Reader.TryRead(out var frame))
+            long nextTick = Environment.TickCount;
+
+            while (!_cts.Token.IsCancellationRequested)
             {
-                while ((nextTick - tick) <= 0)
+                long tick = Environment.TickCount;
+                var dist = nextTick - tick;
+
+                if (dist > 0)
                 {
-                    if (_silenceFramesCount++ < MaxSilenceFrames)
-                    {
-                        await WriteFrameAsync(SilencesFrames, _cts.Token);
-                    }
-
-                    nextTick += FrameMillis;
+                    await Task.Delay((int)dist, _cts.Token);
+                    continue;
                 }
 
-                _ = await _sendingChannel.Reader.WaitToReadAsync(_cts.Token);
+                if (!_sendingChannel.Reader.TryRead(out var frame))
+                {
+                    while ((nextTick - tick) <= 0)
+                    {
+                        if (_silenceFramesCount++ < MaxSilenceFrames)
+                        {
+                            await WriteFrameAsync(SilencesFrames, _cts.Token);
+                        }
 
-                continue;
+                        nextTick = AppendNextState(nextTick);
+                    }
+
+                    if (!await _sendingChannel.Reader.WaitToReadAsync())
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+
+                await WriteFrameAsync(frame.MemoryOwner.Memory[..frame.Length], _cts.Token);
+
+                frame.MemoryOwner.Dispose();
+
+                _ = _queueLock.Release();
+
+                nextTick = AppendNextState(nextTick);
+
+                if (_silenceFramesCount != 0)
+                {
+                    _silenceFramesCount = 0;
+                }
             }
-
-            await WriteFrameAsync(frame.MemoryOwner.Memory[..frame.Length], _cts.Token);
-
-            frame.MemoryOwner.Dispose();
-
-            nextTick += FrameMillis;
-
-            if (_silenceFramesCount != 0)
-            {
-                _silenceFramesCount = 0;
-            }
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 
     private async ValueTask WriteFrameAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {
-        var packetArray = ArrayPool<byte>.Shared.Rent(_client.EncryptionMode.CalculatePacketSize());
+        var packetLength = _client.EncryptionMode.GetPacketLength(frame.Length);
+        var packetArray = ArrayPool<byte>.Shared.Rent(packetLength);
 
         try
         {
-            var length = PreparePacket(frame.Span, packetArray);
+            var packet = packetArray.AsMemory(0, packetLength);
 
-            var packet = packetArray.AsMemory(0, length);
+            packet.Span.Fill(0);
+
+            var length = ProcessFrameToPacket(frame.Span, packet.Span);
+
+            packet = packet[..length];
 
             _ = await _client.SendFrameAsync(packet, cancellationToken);
         }
@@ -172,57 +188,63 @@ public class OpusAudioFramePoller : IDisposable, IAsyncDisposable
         }
     }
 
-    private int PreparePacket(ReadOnlySpan<byte> frame, Span<byte> packet)
+    private int ProcessFrameToPacket(ReadOnlySpan<byte> frame, Span<byte> packet)
     {
-        Rtp.EncodeHeader(_seq, _timestamp, _client.Ssrc, packet);
+        var header = packet[..Rtp.HeaderSize];
+        var encrypted = packet[Rtp.HeaderSize..^Sodium.NonceSize];
+        var nonce = packet[^Sodium.NonceSize..];
 
-        frame.CopyTo(packet[Rtp.HeaderSize..]);
 
-        _seq++;
-        _timestamp += FrameSamplesPerChannel;
+        Rtp.EncodeHeader(_seq, _timestamp, _client.Ssrc, header);
 
-        Span<byte> nonce = stackalloc byte[Sodium.NonceSize];
-
-        _client.EncryptionMode.GenerateNonce(packet[..Rtp.HeaderSize], _nonce++, nonce);
-
-        Span<byte> encrypted = stackalloc byte[Sodium.CalculateTargetSize(frame)];
+        _client.EncryptionMode.GenerateNonce(nonce, header, _seq);
 
         _client.EncryptionMode.Encrypt(frame, encrypted, nonce, _client.SecretKey.Span);
 
-        encrypted.CopyTo(packet[Rtp.HeaderSize..]);
+        return _client.EncryptionMode.CalculatePacketSize(frame.Length);
+    }
 
-        _client.EncryptionMode.AppendNonce(nonce, packet);
-
-        return _client.EncryptionMode.CalculatePacketSize(encrypted.Length);
+    private long AppendNextState(long nextTick)
+    {
+        _seq++;
+        _timestamp += FrameSamplesPerChannel;
+        return nextTick + FrameMillis;
     }
 
     private async Task RunWriterAsync()
     {
-        while (!_cts.Token.IsCancellationRequested)
+        try
         {
-            var memoryOwner = MemoryPool<byte>.Shared.Rent(1024);
-
-            var bytesReaded = await _client.AudioFrameSender.ProvideFrameAsync(memoryOwner.Memory, _cts.Token);
-
-            var frame = new AudioFrame(memoryOwner, bytesReaded);
-
-            if (!_sendingChannel.Writer.TryWrite(frame))
+            while (!_cts.Token.IsCancellationRequested)
             {
-                while (await _sendingChannel.Writer.WaitToWriteAsync(_cts.Token))
+                await _queueLock.WaitAsync(_cts.Token);
+
+                var memoryOwner = MemoryPool<byte>.Shared.Rent(1024);
+
+                var bytesReaded = await _client.AudioFrameSender.ProvideFrameAsync(memoryOwner.Memory, _cts.Token);
+
+                var frame = new AudioFrame(memoryOwner, bytesReaded);
+
+                if (!_sendingChannel.Writer.TryWrite(frame))
                 {
-                    if (_sendingChannel.Writer.TryWrite(frame))
+                    while (await _sendingChannel.Writer.WaitToWriteAsync(_cts.Token))
                     {
-                        break;
+                        if (_sendingChannel.Writer.TryWrite(frame))
+                        {
+                            break;
+                        }
                     }
                 }
-            }
 
-            if (!_preloadedTsc.Task.IsCompleted && _sendingChannel.Reader.Count >= QueueLength)
-            {
-                _ = _preloadedTsc.TrySetResult();
+                if (!_preloadedTsc.Task.IsCompleted && _sendingChannel.Reader.Count >= QueueLength)
+                {
+                    _ = _preloadedTsc.TrySetResult();
+                }
             }
         }
-
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     public void Dispose()

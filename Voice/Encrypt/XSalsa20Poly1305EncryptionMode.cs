@@ -7,28 +7,13 @@ namespace DiscordAudioTests.Voice.Encrypt;
 
 public static class XSalsa20Poly1305EncryptionMode
 {
-    public static int CalculatePacketSize(int encryptionLength)
+    public static int CalculatePacketSize(int frameLength)
     {
-        return Rtp.HeaderSize + encryptionLength;
+        return Sodium.CalculateTargetSize(frameLength) + Rtp.HeaderSize;
     }
 
-    public static void GenerateNonce(ReadOnlySpan<byte> rtpHeader, Span<byte> target)
+    public static void GenerateNonce(Span<byte> nonce, ReadOnlySpan<byte> rtpHeader)
     {
-        if (rtpHeader.Length != Rtp.HeaderSize)
-        {
-            throw new ArgumentException($"RTP header needs to have a length of exactly {Rtp.HeaderSize} bytes.", nameof(rtpHeader));
-        }
-
-        if (target.Length != Sodium.NonceSize)
-        {
-            throw new ArgumentException($"Invalid nonce buffer size. Target buffer for the nonce needs to have a capacity of {Sodium.NonceSize} bytes.", nameof(target));
-        }
-
-        // Write the header to the beginning of the span.
-        rtpHeader.CopyTo(target);
-
-        // Zero rest of the span.
-
-        target[rtpHeader.Length..].Fill(0);
+        rtpHeader.CopyTo(nonce);
     }
 }

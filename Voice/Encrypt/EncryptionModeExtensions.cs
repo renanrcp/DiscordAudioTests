@@ -11,9 +11,9 @@ public static class EncryptionModeExtensions
 {
     private static Dictionary<string, EncryptionMode> SupportedModes => new()
     {
-        ["xsalsa20_poly1305_lite"] = EncryptionMode.XSalsa20Poly1305LiteEncryptionMode,
-        ["xsalsa20_poly1305_suffix"] = EncryptionMode.XSalsa20Poly1305SuffixEncryptionMode,
-        ["xsalsa20_poly1305"] = EncryptionMode.XSalsa20Poly1305EncryptionMode,
+        ["xsalsa20_poly1305_lite"] = EncryptionMode.XSalsa20Poly1305Lite,
+        ["xsalsa20_poly1305_suffix"] = EncryptionMode.XSalsa20Poly1305Suffix,
+        ["xsalsa20_poly1305"] = EncryptionMode.XSalsa20Poly1305,
     };
 
     public static string SelectMode(string[] modes)
@@ -34,51 +34,41 @@ public static class EncryptionModeExtensions
         return SupportedModes[mode];
     }
 
-    public static int CalculatePacketSize(this EncryptionMode mode)
+#pragma warning disable IDE0060
+    public static int GetPacketLength(this EncryptionMode mode, int frameLength)
     {
-        return CalculatePacketSize(mode, Rtp.GetEncryptionLength());
+        return Sodium.CalculateTargetSize(frameLength) + Rtp.HeaderSize + Sodium.NonceSize;
     }
+#pragma warning restore IDE0060
 
-    public static int CalculatePacketSize(this EncryptionMode mode, int encryptionLength)
+    public static int CalculatePacketSize(this EncryptionMode mode, int frameLength)
     {
         return mode switch
         {
-            EncryptionMode.XSalsa20Poly1305EncryptionMode => XSalsa20Poly1305EncryptionMode.CalculatePacketSize(encryptionLength),
-            EncryptionMode.XSalsa20Poly1305LiteEncryptionMode => XSalsa20Poly1305LiteEncryptionMode.CalculatePacketSize(encryptionLength),
-            EncryptionMode.XSalsa20Poly1305SuffixEncryptionMode => XSalsa20Poly1305SuffixEncryptionMode.CalculatePacketSize(encryptionLength),
+            EncryptionMode.XSalsa20Poly1305 => XSalsa20Poly1305EncryptionMode.CalculatePacketSize(frameLength),
+            EncryptionMode.XSalsa20Poly1305Lite => XSalsa20Poly1305LiteEncryptionMode.CalculatePacketSize(frameLength),
+            EncryptionMode.XSalsa20Poly1305Suffix => XSalsa20Poly1305SuffixEncryptionMode.CalculatePacketSize(frameLength),
             _ => 0,
         };
     }
 
-    public static void AppendNonce(this EncryptionMode mode, ReadOnlySpan<byte> nonce, Span<byte> target)
+    public static void GenerateNonce(this EncryptionMode mode, Span<byte> nonce, ReadOnlySpan<byte> rtpHeader, uint seq)
     {
-        switch (mode)
+        if (nonce.Length != Sodium.NonceSize)
         {
-            case EncryptionMode.XSalsa20Poly1305EncryptionMode:
-                break;
-            case EncryptionMode.XSalsa20Poly1305LiteEncryptionMode:
-                XSalsa20Poly1305LiteEncryptionMode.AppendNonce(nonce, target);
-                break;
-            case EncryptionMode.XSalsa20Poly1305SuffixEncryptionMode:
-                XSalsa20Poly1305SuffixEncryptionMode.AppendNonce(nonce, target);
-                break;
-            default:
-                break;
+            throw new ArgumentException($"'{nameof(nonce)}' cannot have length different than '{Sodium.NonceSize}'.", nameof(nonce));
         }
-    }
 
-    public static void GenerateNonce(this EncryptionMode mode, ReadOnlySpan<byte> rtpHeader, uint nonce, Span<byte> target)
-    {
         switch (mode)
         {
-            case EncryptionMode.XSalsa20Poly1305EncryptionMode:
-                XSalsa20Poly1305EncryptionMode.GenerateNonce(rtpHeader, target);
+            case EncryptionMode.XSalsa20Poly1305:
+                XSalsa20Poly1305EncryptionMode.GenerateNonce(nonce, rtpHeader);
                 break;
-            case EncryptionMode.XSalsa20Poly1305LiteEncryptionMode:
-                XSalsa20Poly1305LiteEncryptionMode.GenerateNonce(nonce, target);
+            case EncryptionMode.XSalsa20Poly1305Lite:
+                XSalsa20Poly1305LiteEncryptionMode.GenerateNonce(nonce, seq);
                 break;
-            case EncryptionMode.XSalsa20Poly1305SuffixEncryptionMode:
-                XSalsa20Poly1305SuffixEncryptionMode.GenerateNonce(target);
+            case EncryptionMode.XSalsa20Poly1305Suffix:
+                XSalsa20Poly1305SuffixEncryptionMode.GenerateNonce(nonce);
                 break;
             default:
                 break;

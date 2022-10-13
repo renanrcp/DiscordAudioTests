@@ -8,27 +8,13 @@ namespace DiscordAudioTests.Voice.Encrypt;
 
 public static class XSalsa20Poly1305LiteEncryptionMode
 {
-    public static int CalculatePacketSize(int encryptionLength)
+    public static int CalculatePacketSize(int frameLength)
     {
-        return Rtp.HeaderSize + encryptionLength + 4;
+        return Sodium.CalculateTargetSize(frameLength) + Rtp.HeaderSize + 4;
     }
 
-    public static void GenerateNonce(uint nonce, Span<byte> target)
+    public static void GenerateNonce(Span<byte> nonce, uint seq)
     {
-        if (target.Length != Sodium.NonceSize)
-        {
-            throw new ArgumentException($"Invalid nonce buffer size. Target buffer for the nonce needs to have a capacity of {Sodium.NonceSize} bytes.", nameof(target));
-        }
-
-        // Write the uint to memory
-        BinaryPrimitives.WriteUInt32BigEndian(target, nonce);
-
-        // Zero rest of the buffer.
-        target[4..].Fill(0);
-    }
-
-    public static void AppendNonce(ReadOnlySpan<byte> nonce, Span<byte> target)
-    {
-        nonce[..4].CopyTo(target[^4..]);
+        BinaryPrimitives.WriteUInt32BigEndian(nonce, seq);
     }
 }

@@ -45,7 +45,7 @@ public static class Rtp
         return sampleCount * 2 * 2;
     }
 
-    public static int GetEncryptionLength()
+    public static int GetPacketLength()
     {
         return SampleCountToSampleSize(CalculateMaximumFrameSize());
     }
@@ -54,7 +54,7 @@ public static class Rtp
     {
         if (target.Length < HeaderSize)
         {
-            throw new ArgumentException("Header buffer is too short.", nameof(target));
+            throw new ArgumentException($"Header buffer needs to have at least '{HeaderSize}' bytes.", nameof(target));
         }
 
         target[0] = RtpNoExtension;
