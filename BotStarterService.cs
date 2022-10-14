@@ -29,7 +29,10 @@ public class BotStarterService : IHostedService
         _client = provider.GetRequiredService<DiscordShardedClient>();
         _commandService = provider.GetRequiredService<CommandService>();
     }
+
     private int ShardsInitialized;
+
+    private bool IsStarted { get; set; }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -45,8 +48,9 @@ public class BotStarterService : IHostedService
     {
         _ = Interlocked.Increment(ref ShardsInitialized);
 
-        if (Volatile.Read(ref ShardsInitialized) >= _client.Shards.Count)
+        if (!IsStarted && Volatile.Read(ref ShardsInitialized) >= _client.Shards.Count)
         {
+            IsStarted = true;
             _ = _commandService.AddModulesAsync(typeof(AudioService).Assembly, _provider);
             _client.MessageReceived += MessageReceived;
         }
@@ -86,6 +90,9 @@ public class BotStarterService : IHostedService
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        _client.ShardReady -= ShardReadyAsync;
+        _client.MessageReceived -= MessageReceived;
+
         await _client.SetStatusAsync(UserStatus.Invisible);
         await _client.StopAsync();
     }
