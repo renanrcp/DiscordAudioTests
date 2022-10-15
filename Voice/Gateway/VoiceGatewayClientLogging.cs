@@ -35,16 +35,16 @@ public static partial class VoiceGatewayClientLogging
     [LoggerMessage(2, LogLevel.Trace, "Sending payload opcode '{Opcode}' with body '{Json}'.", SkipEnabledCheck = true)]
     public static partial void LogPayloadSent(this ILogger logger, PayloadOpcode opcode, string json);
 
-    [LoggerMessage(3, LogLevel.Debug, "Sending Identify payload.")]
+    [LoggerMessage(3, LogLevel.Information, "Sending Identify payload.")]
     public static partial void LogIdentify(this ILogger logger);
 
-    [LoggerMessage(4, LogLevel.Debug, "Sending resume payload.")]
+    [LoggerMessage(4, LogLevel.Information, "Sending resume payload.")]
     public static partial void LogResuming(this ILogger logger);
 
-    [LoggerMessage(5, LogLevel.Debug, "Received hello payload with hearbeat interval '{HeartbeatInterval}'.")]
+    [LoggerMessage(5, LogLevel.Information, "Received hello payload with hearbeat interval '{HeartbeatInterval}'.")]
     public static partial void LogHello(this ILogger logger, float heartbeatInterval);
 
-    [LoggerMessage(6, LogLevel.Debug, "Resumed sucessfully.")]
+    [LoggerMessage(6, LogLevel.Information, "Resumed sucessfully.")]
     public static partial void LogResumed(this ILogger logger);
 
     [LoggerMessage(7, LogLevel.Debug, "Successfully discovery, our address is '{Address}:{Port}'.")]

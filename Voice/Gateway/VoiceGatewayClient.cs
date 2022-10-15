@@ -120,6 +120,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Stop called");
+
         if (!Started)
         {
             return;
@@ -136,6 +138,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
                 return;
             }
 
+            _logger.LogInformation("Trying cancel cts from stop...");
             _cts.Cancel(false);
             _cts.Dispose();
         }
@@ -191,7 +194,7 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         var ctsCancelled = _cts?.Token.IsCancellationRequested == true;
         _logger.LogInformation("Trying reconnecting cts is '{ctsCancelled}' and shouldResume is '{shouldResume}'", ctsCancelled, _shouldResume);
 
-        if (ctsCancelled || !_shouldResume)
+        if (ctsCancelled)
         {
             return false;
         }
@@ -201,6 +204,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
             var reconnectTokenIsSameAsCts = cancellationToken == _cts.Token;
 
             await _framePoller.StopAsync(cancellationToken);
+
+            _logger.LogInformation("Trying cancel cts from reconnect...");
 
             _cts.Cancel(false);
             _cts = new();
@@ -322,6 +327,12 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
 
     private async Task ConnectionClosed(ConnectionClosedEventArgs e)
     {
+        var status = e.CloseStatus;
+        var message = e.CloseMessage;
+        var description = e.CloseStatusDescription;
+
+        _logger.LogInformation("Websocket disconnected status: {Status}, message: {Message}, descripton: {Description}", status, message, description);
+
         if (_cts == null)
         {
             _logger.LogCritical("Tried reconnect but cts is null.");
