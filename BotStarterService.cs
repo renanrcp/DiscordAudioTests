@@ -10,6 +10,7 @@ using Discord.WebSocket;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace DiscordAudioTests;
 
@@ -21,6 +22,7 @@ public class BotStarterService : IHostedService
     private readonly IConfiguration _configuration;
     private readonly DiscordShardedClient _client;
     private readonly CommandService _commandService;
+    private readonly ILogger<CommandService> _commandServiceLogger;
 
     public BotStarterService(IServiceProvider provider)
     {
@@ -86,6 +88,11 @@ public class BotStarterService : IHostedService
             context: context,
             argPos: argPos,
             _provider);
+
+        var guildId = context.Guild.Id;
+        var command = message.Content.Replace("!", string.Empty);
+
+        _commandServiceLogger.LogInformation("Command '{command}' executed in guild '{guildId}'.", command, guildId);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
