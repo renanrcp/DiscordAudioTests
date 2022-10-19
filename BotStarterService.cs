@@ -30,6 +30,7 @@ public class BotStarterService : IHostedService
         _configuration = provider.GetRequiredService<IConfiguration>();
         _client = provider.GetRequiredService<DiscordShardedClient>();
         _commandService = provider.GetRequiredService<CommandService>();
+        _commandServiceLogger = provider.GetRequiredService<ILogger<CommandService>>();
     }
 
     private int ShardsInitialized;
