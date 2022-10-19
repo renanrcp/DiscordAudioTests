@@ -203,8 +203,6 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
         {
             var reconnectTokenIsSameAsCts = cancellationToken == _cts.Token;
 
-            await _framePoller.StopAsync(cancellationToken);
-
             _logger.LogInformation("Trying cancel cts from reconnect...");
 
             _cts.Cancel(false);
@@ -214,6 +212,8 @@ public sealed class VoiceGatewayClient : IDisposable, IAsyncDisposable
             {
                 cancellationToken = _cts.Token;
             }
+
+            await _framePoller.StopAsync(cancellationToken);
 
             Started = false;
 
