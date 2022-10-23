@@ -45,6 +45,30 @@ public class BotStarterService : IHostedService
         await _client.StartAsync();
 
         _client.ShardReady += ShardReadyAsync;
+        _commandService.CommandExecuted += CommandExecutedAsync;
+    }
+
+    private Task CommandExecutedAsync(Optional<CommandInfo> command, ICommandContext context, IResult result)
+    {
+        if (!command.IsSpecified)
+        {
+            return Task.CompletedTask;
+        }
+
+        var commandName = command.Value.Name;
+        var guildId = context.Guild.Id;
+
+        if (result.IsSuccess)
+        {
+            _commandServiceLogger.LogInformation("Command '{commandName}' executed in guild '{guildId}'.", commandName, guildId);
+        }
+        else if (result is ExecuteResult executeResult && executeResult.Exception != null)
+        {
+            _commandServiceLogger.LogError(executeResult.Exception, "Command '{commandName}' executed in guild '{guildId}' throwed an exception", commandName, guildId);
+            return context.Channel.SendMessageAsync("Ops, an error ocurried when executing this command.");
+        }
+
+        return Task.CompletedTask;
     }
 
     private Task ShardReadyAsync(DiscordSocketClient arg)
@@ -89,17 +113,13 @@ public class BotStarterService : IHostedService
             context: context,
             argPos: argPos,
             _provider);
-
-        var guildId = context.Guild.Id;
-        var command = message.Content.Replace("!", string.Empty);
-
-        _commandServiceLogger.LogInformation("Command '{command}' executed in guild '{guildId}'.", command, guildId);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _client.ShardReady -= ShardReadyAsync;
         _client.MessageReceived -= MessageReceived;
+        _commandService.CommandExecuted -= CommandExecutedAsync;
 
         await _client.SetStatusAsync(UserStatus.Invisible);
         await _client.StopAsync();
