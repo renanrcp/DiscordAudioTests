@@ -126,7 +126,7 @@ public sealed class CustomFormatter : ConsoleFormatter, IDisposable
             LogLevel.Critical => ("CRIT", Color.Crimson),
             LogLevel.Error => ("EROR", Color.Crimson),
             LogLevel.Warning => ("WARN", Color.Orange),
-            LogLevel.None => throw new NotImplementedException(),
+            LogLevel.None => ("UKNW", Color.Tomato),
             _ => ("UKNW", Color.Tomato),
         };
     }
