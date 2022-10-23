@@ -5,10 +5,13 @@ using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
 using DiscordAudioTests.Http;
+using DiscordAudioTests.Logger;
 using DiscordAudioTests.Voice;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 namespace DiscordAudioTests;
 
@@ -26,11 +29,28 @@ public class Startup
 
     public void ConfigureServices(IServiceCollection services)
     {
+        _ = services.Configure<ConsoleLoggerOptions>(options =>
+        {
+            options.FormatterName = nameof(CustomFormatter);
+        });
+        _ = services.AddLogging(loggingBuilder =>
+        {
+            _ = loggingBuilder.AddConsoleFormatter<CustomFormatter, CustomFormatterOptions>((options) =>
+            {
+                options.UseUtcTimestamp = !Environment.IsDevelopment();
+                options.IncludeScopes = true;
+            });
+        });
+
         _ = services.AddSingleton(new DiscordSocketConfig
         {
             AlwaysDownloadUsers = false,
             LogLevel = LogSeverity.Debug,
-            GatewayIntents = GatewayIntents.All,
+            GatewayIntents =
+                GatewayIntents.MessageContent |
+                GatewayIntents.GuildMessages |
+                GatewayIntents.GuildVoiceStates |
+                GatewayIntents.Guilds,
         });
         _ = services.AddSingleton(sp =>
         {
