@@ -130,7 +130,7 @@ public class AudioPlayer : IAudioFrameSender, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            if (ex is not OperationCanceledException)
+            if (ex is not OperationCanceledException and ObjectDisposedException)
             {
                 PlayerException?.Invoke(this, ex);
             }

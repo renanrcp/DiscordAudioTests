@@ -116,10 +116,11 @@ public class AudioService
             sourceStream = AudioStream.CreateFromFile(url, new FileAudioStreamOptions()
             {
                 RecommendedSynchronicity = RecommendedSynchronicity.Async,
+                LoggerFactory = _loggerFactory,
             });
         }
 
-        var demuxer = new MatroskaDemuxer(sourceStream, _demuxerOptions, _loggerFactory);
+        var demuxer = new MatroskaDemuxer(sourceStream, _demuxerOptions);
 
         player.Queue.Enqueue(demuxer);
 
@@ -193,7 +194,7 @@ public class AudioService
 
     public void PlayerException(AudioPlayer player, Exception exception)
     {
-        if (exception is OperationCanceledException)
+        if (exception is OperationCanceledException or ObjectDisposedException)
         {
             return;
         }
