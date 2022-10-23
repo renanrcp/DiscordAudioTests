@@ -68,7 +68,7 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
         _ = await ReplyAsync("song skipped.");
     }
 
-    [Command("pause"), Alias("resume")]
+    [Command("Pause"), Alias("Resume")]
     public async Task PauseOrResumeAsync()
     {
         if (!UserConnected)
@@ -97,13 +97,13 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
     }
 
     // disabled for now
-    // [Command("seek")]
+    // [Command("Seek")]
     // public Task SeekAsync([Remainder] TimeSpan time)
     // {
     //     return Player.SeekAsync(time).AsTask();
     // }
 
-    [Command("stop")]
+    [Command("Stop")]
     public async Task StopAsync()
     {
         if (!UserConnected)
