@@ -60,7 +60,7 @@ public class Startup
         });
         _ = services.AddSingleton(new CommandServiceConfig
         {
-            CaseSensitiveCommands = true,
+            CaseSensitiveCommands = false,
             IgnoreExtraArgs = true,
             DefaultRunMode = RunMode.Async,
             SeparatorChar = ' ',

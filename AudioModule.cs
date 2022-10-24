@@ -22,7 +22,7 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
 
     private bool UserConnected => (Context.User as IGuildUser).VoiceChannel != null;
 
-    [Command("play")]
+    [Command("Play")]
     public async Task PlayAsync([Remainder] string url)
     {
         if (!UserConnected)
@@ -43,7 +43,7 @@ public class AudioModule : ModuleBase<ShardedCommandContext>
         _ = await ReplyAsync($"Song '{url}' added to queue.");
     }
 
-    [Command("skip")]
+    [Command("Skip")]
     public async Task SkipAsync()
     {
         if (!UserConnected)
